@@ -1,7 +1,7 @@
 {:paths ["src" "resources"]
 
  :deps {org.clojure/clojure {:mvn/version "1.12.0"}
-        rewrite-clj/rewrite-clj {:local/root "../rewrite-clj"}
+        rewrite-clj/rewrite-clj {:mvn/version "1.2.52"}
         instaparse/instaparse {:mvn/version "1.5.0"}
         org.clojure/tools.cli {:mvn/version "1.1.230"}}
 
@@ -27,12 +27,13 @@
   ;; Run CLI
   :run {:main-opts ["-m" "superficie.main"]}
 
-  ;; Release: use published deps (no local/root)
-  :release {:override-deps {rewrite-clj/rewrite-clj {:mvn/version "1.2.52"}}}
-
   ;; Build and deploy
   :build {:deps {io.github.clojure/tools.build {:mvn/version "0.10.6"}
-                 slipset/deps-deploy {:mvn/version "0.2.2"}}
+                 slipset/deps-deploy {:mvn/version "0.2.2"}
+                 io.github.borkdude/gh-release-artifact {:git/sha "b946558225a7839f6a0f644834e838e190dc2262"}
+                 babashka/babashka.curl {:mvn/version "0.1.2"}
+                 babashka/fs {:mvn/version "0.3.17"}
+                 cheshire/cheshire {:mvn/version "5.11.0"}}
           :ns-default build}
 
   ;; Code formatting check

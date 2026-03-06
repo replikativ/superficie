@@ -1,18 +1,16 @@
 (ns build
-  "Build script for superficie.
+  (:refer-clojure :exclude [test])
+  (:require [clojure.tools.build.api :as b]
+            [borkdude.gh-release-artifact :as gh]
+            [deps-deploy.deps-deploy :as dd])
+  (:import [clojure.lang ExceptionInfo]))
 
-   Usage:
-     clojure -T:build jar      - Build JAR
-     clojure -T:build install  - Install to local Maven repo
-     clojure -T:build deploy   - Deploy to Clojars
-     clojure -T:build clean    - Clean build artifacts"
-  (:require [clojure.tools.build.api :as b]))
-
+(def org "replikativ")
 (def lib 'org.replikativ/superficie)
+(def current-commit (b/git-process {:git-args "rev-parse HEAD"}))
 (def version (format "0.1.%s" (b/git-count-revs nil)))
 (def class-dir "target/classes")
-(def basis (delay (b/create-basis {:project "deps.edn"
-                                   :aliases [:release]})))
+(def basis (b/create-basis {:project "deps.edn"}))
 (def jar-file (format "target/%s-%s.jar" (name lib) version))
 
 (defn clean [_]
@@ -23,7 +21,7 @@
   (b/write-pom {:class-dir class-dir
                 :lib lib
                 :version version
-                :basis @basis
+                :basis basis
                 :src-dirs ["src"]
                 :scm {:url "https://github.com/replikativ/superficie"
                       :connection "scm:git:git://github.com/replikativ/superficie.git"
@@ -43,29 +41,57 @@
   (b/copy-dir {:src-dirs ["src" "resources"]
                :target-dir class-dir})
   (b/jar {:class-dir class-dir
-          :jar-file jar-file})
-  (println (str "JAR: " jar-file " (version " version ")")))
+          :jar-file jar-file}))
 
-(defn install [_]
+(defn deploy
+  "Don't forget to set CLOJARS_USERNAME and CLOJARS_PASSWORD env vars."
+  [_]
   (jar nil)
-  (b/install {:basis @basis
+  (dd/deploy {:installer :remote :artifact jar-file
+              :pom-file (b/pom-path {:lib lib :class-dir class-dir})}))
+
+(defn fib [a b]
+  (lazy-seq (cons a (fib b (+ a b)))))
+
+(defn retry-with-fib-backoff [retries exec-fn test-fn]
+  (loop [idle-times (take retries (fib 1 2))]
+    (let [result (exec-fn)]
+      (if (test-fn result)
+        (do (println "Returned: " result)
+            (if-let [sleep-ms (first idle-times)]
+              (do (println "Retrying with remaining back-off times (in s): " idle-times)
+                  (Thread/sleep (* 1000 sleep-ms))
+                  (recur (rest idle-times)))
+              result))
+        result))))
+
+(defn try-release []
+  (try (gh/overwrite-asset {:org org
+                            :repo (name lib)
+                            :tag version
+                            :commit current-commit
+                            :file jar-file
+                            :content-type "application/java-archive"
+                            :draft false})
+       (catch ExceptionInfo e
+         (assoc (ex-data e) :failure? true))))
+
+(defn release
+  [_]
+  (jar nil)
+  (println "Trying to release artifact...")
+  (let [ret (retry-with-fib-backoff 10 try-release :failure?)]
+    (if (:failure? ret)
+      (do (println "GitHub release failed!")
+          (System/exit 1))
+      (println (:url ret)))))
+
+(defn install
+  [_]
+  (clean nil)
+  (jar nil)
+  (b/install {:basis (b/create-basis {})
               :lib lib
               :version version
               :jar-file jar-file
-              :class-dir class-dir})
-  (println (str "Installed " lib " " version " to local Maven repo")))
-
-(defn deploy
-  "Deploy to Clojars.
-
-   Requires environment variables:
-     CLOJARS_USERNAME - your Clojars username
-     CLOJARS_PASSWORD - your Clojars deploy token"
-  [_]
-  (jar nil)
-  (let [dd (requiring-resolve 'deps-deploy.deps-deploy/deploy)]
-    (println "Deploying to Clojars...")
-    (dd {:installer :remote
-         :artifact (b/resolve-path jar-file)
-         :pom-file (b/pom-path {:lib lib :class-dir class-dir})})
-    (println (format "Deployed %s version %s to Clojars" lib version))))
+              :class-dir class-dir}))
