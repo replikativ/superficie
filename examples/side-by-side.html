@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Superficie – Side by Side</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/clojure.min.js"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f8f9fa; padding: 2rem; max-width: 1200px; margin: 0 auto; }
+  h1 { margin-bottom: 0.5rem; }
+  .subtitle { color: #666; margin-bottom: 2rem; }
+
+  .example { margin-bottom: 2rem; border: 1px solid #e1e4e8; border-radius: 8px; overflow: hidden; background: #fff; }
+  .example-title { padding: 0.75rem 1rem; background: #f6f8fa; border-bottom: 1px solid #e1e4e8; font-weight: 600; font-size: 0.9rem; color: #24292e; }
+
+  /* Tab buttons */
+  .tabs { display: flex; border-bottom: 1px solid #e1e4e8; background: #fafbfc; }
+  .tab-btn { padding: 0.5rem 1rem; border: none; background: none; cursor: pointer; font-size: 0.85rem; font-weight: 500; color: #586069; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+  .tab-btn.active { color: #0366d6; border-bottom-color: #0366d6; background: #fff; }
+  .tab-btn:hover:not(.active) { color: #24292e; }
+
+  /* Code panels */
+  .panels { position: relative; }
+  .panel { display: none; }
+  .panel.active { display: block; }
+  .panel pre { margin: 0; padding: 1rem; overflow-x: auto; font-size: 0.875rem; line-height: 1.5; }
+  .panel code { font-family: "JetBrains Mono", "Fira Code", "SF Mono", Menlo, monospace; }
+
+  /* Side-by-side mode for wide screens */
+  @media (min-width: 768px) {
+    .mode-sidebyside .tabs { display: none; }
+    .mode-sidebyside .panels { display: flex; }
+    .mode-sidebyside .panel { display: block !important; flex: 1; min-width: 0; }
+    .mode-sidebyside .panel + .panel { border-left: 1px solid #e1e4e8; }
+    .mode-sidebyside .panel-label { display: block; padding: 0.25rem 1rem; background: #f6f8fa; border-bottom: 1px solid #e1e4e8; font-size: 0.75rem; font-weight: 600; color: #586069; text-transform: uppercase; letter-spacing: 0.05em; }
+  }
+  .panel-label { display: none; }
+
+  /* Mode toggle */
+  .controls { margin-bottom: 1rem; display: flex; gap: 0.5rem; align-items: center; }
+  .controls label { font-size: 0.85rem; color: #586069; }
+  .toggle { appearance: none; width: 36px; height: 20px; background: #d1d5da; border-radius: 10px; position: relative; cursor: pointer; transition: background 0.2s; }
+  .toggle:checked { background: #0366d6; }
+  .toggle::after { content: ''; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; background: #fff; border-radius: 50%; transition: transform 0.2s; }
+  .toggle:checked::after { transform: translateX(16px); }
+</style>
+</head>
+<body>
+
+<h1>Superficie</h1>
+<p class="subtitle">Surface syntax for Clojure — side by side comparison</p>
+
+<div class="controls">
+  <label for="mode-toggle">Side by side</label>
+  <input type="checkbox" id="mode-toggle" class="toggle" checked>
+</div>
+
+<div id="examples"></div>
+
+<script src="../dist/superficie.hljs.js"></script>
+<script>
+
+const examples = [
+  {
+    title: "Namespace declaration",
+    clojure: `(ns myapp.core
+  (:require [clojure.string :as str]
+            [clojure.set :refer [union intersection]]))`,
+    superficie: `ns myapp.core
+  (:require [clojure.string :as str]
+            [clojure.set :refer [union intersection]])
+end`
+  },
+  {
+    title: "Definitions",
+    clojure: `(def pi 3.14159)
+
+(defonce db-conn
+  (connect "localhost:5432"))`,
+    superficie: `def pi := 3.14159
+
+defonce db-conn := connect("localhost:5432")`
+  },
+  {
+    title: "Function definition",
+    clojure: `(defn greet [name]
+  (str "Hello, " name "!"))`,
+    superficie: `defn greet(name):
+  str("Hello, ", name, "!")
+end`
+  },
+  {
+    title: "Arithmetic with operator precedence",
+    clojure: `(defn quadratic [a b c x]
+  (+ (* a x x) (* b x) c))`,
+    superficie: `defn quadratic(a, b, c, x):
+  a * x * x + b * x + c
+end`
+  },
+  {
+    title: "Threading (pipes)",
+    clojure: `(defn process-users [users]
+  (->> users
+       (filter :active)
+       (map :name)
+       (sort)
+       (take 10)))`,
+    superficie: `defn process-users(users):
+  users
+    |> filter(:active)
+    |> map(:name)
+    |> sort()
+    |> take(10)
+end`
+  },
+  {
+    title: "Control flow",
+    clojure: `(defn classify [x]
+  (cond
+    (neg? x) :negative
+    (zero? x) :zero
+    :else :positive))`,
+    superficie: `defn classify(x):
+  cond:
+    neg?(x) => :negative
+    zero?(x) => :zero
+    :else => :positive
+  end
+end`
+  },
+  {
+    title: "Let bindings and if/else",
+    clojure: `(defn safe-divide [a b]
+  (if (zero? b)
+    {:error "Division by zero"}
+    (let [result (/ a b)
+          rounded (Math/round result)]
+      {:value result :rounded rounded})))`,
+    superficie: `defn safe-divide(a, b):
+  if zero?(b):
+    {:error "Division by zero"}
+  else:
+    let result := a / b, rounded := Math/round(result):
+      {:value result, :rounded rounded}
+    end
+  end
+end`
+  },
+  {
+    title: "Loop/recur",
+    clojure: `(defn factorial [n]
+  (loop [i n acc 1]
+    (if (<= i 1)
+      acc
+      (recur (dec i) (* acc i)))))`,
+    superficie: `defn factorial(n):
+  loop i := n, acc := 1:
+    if i <= 1:
+      acc
+    else:
+      recur(dec(i), acc * i)
+    end
+  end
+end`
+  },
+  {
+    title: "Try/catch and Java interop",
+    clojure: `(defn parse-int [s]
+  (try
+    (Integer/parseInt s)
+    (catch NumberFormatException e
+      (println (str "Invalid: " (.getMessage e)))
+      nil)))`,
+    superficie: `defn parse-int(s):
+  try:
+    Integer/parseInt(s)
+  catch NumberFormatException e:
+    println(str("Invalid: ", e.getMessage()))
+    nil
+  end
+end`
+  },
+  {
+    title: "For comprehension",
+    clojure: `(defn pairs [xs ys]
+  (for [x xs
+        y ys
+        :when (not= x y)]
+    [x y]))`,
+    superficie: `defn pairs(xs, ys):
+  for x in xs, y in ys, when x not= y:
+    [x, y]
+  end
+end`
+  },
+  {
+    title: "Higher-order functions",
+    clojure: `(defn transform-values [m f]
+  (->> m
+       (map (fn [[k v]] [k (f v)]))
+       (into {})))
+
+(transform-values {:a 1 :b 2 :c 3}
+                  (fn [x] (* x x)))`,
+    superficie: `defn transform-values(m, f):
+  m
+    |> map(fn([k, v]): [k, f(v)] end)
+    |> into({})
+end
+
+transform-values({:a 1, :b 2, :c 3},
+                 fn(x): x * x end)`
+  },
+  {
+    title: "Macros",
+    clojure: `(defmacro unless [pred & body]
+  \`(if (not ~pred)
+     (do ~@body)))`,
+    superficie: `defmacro unless(pred, & body):
+  \`(if (not ~pred)
+     (do ~@body))
+end`
+  },
+  {
+    title: "Reader forms: deref, quote, var",
+    clojure: `(defn swap-and-log [state f]
+  (let [old @state
+        new (swap! state f)]
+    (println (quote swapped) old '-> new)
+    #'swap-and-log))`,
+    superficie: `defn swap-and-log(state, f):
+  let old := @state, new := swap!(state, f):
+    println('swapped, old, '->, new)
+    #'swap-and-log
+  end
+end`
+  },
+  {
+    title: "Comments",
+    clojure: `(defn area [r]
+  ;; classic formula
+  (* Math/PI r r))`,
+    superficie: `defn area(r):
+  ;; classic formula
+  Math/PI * r * r
+end`
+  },
+  {
+    title: "Comment form (sexp passthrough)",
+    clojure: `(comment
+  (greet "world")
+  (+ 1 2 3)
+  (println "scratch pad"))`,
+    superficie: `(comment
+  (greet "world")
+  (+ 1 2 3)
+  (println "scratch pad"))`
+  }
+];
+
+function renderExamples() {
+  const container = document.getElementById('examples');
+  container.innerHTML = examples.map(ex => `
+    <div class="example mode-sidebyside">
+      <div class="example-title">${ex.title}</div>
+      <div class="tabs">
+        <button class="tab-btn active" data-lang="clojure">Clojure</button>
+        <button class="tab-btn" data-lang="superficie">Superficie</button>
+      </div>
+      <div class="panels">
+        <div class="panel active" data-lang="clojure">
+          <div class="panel-label">Clojure</div>
+          <pre><code class="language-clojure">${hljs.highlight(ex.clojure, {language: 'clojure'}).value}</code></pre>
+        </div>
+        <div class="panel" data-lang="superficie">
+          <div class="panel-label">Superficie</div>
+          <pre><code class="language-superficie">${hljs.highlight(ex.superficie, {language: 'superficie'}).value}</code></pre>
+        </div>
+      </div>
+    </div>
+  `).join('');
+
+  // Tab click handlers
+  container.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      const example = e.target.closest('.example');
+      example.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+      example.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+      e.target.classList.add('active');
+      example.querySelector(`.panel[data-lang="${e.target.dataset.lang}"]`).classList.add('active');
+    });
+  });
+}
+
+// Mode toggle
+document.getElementById('mode-toggle').addEventListener('change', (e) => {
+  document.querySelectorAll('.example').forEach(ex => {
+    ex.classList.toggle('mode-sidebyside', e.target.checked);
+  });
+});
+
+renderExamples();
+</script>
+</body>
+</html>

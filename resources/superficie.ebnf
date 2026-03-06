@@ -1,0 +1,260 @@
+(* Superficie grammar — surface syntax for Clojure *)
+(* Key design: whitespace is handled manually so operators are whitespace-sensitive *)
+(*   my-func  = one symbol (dash between identifier segments)                      *)
+(*   a - b    = subtraction (spaces required around binary operators)              *)
+(* Top-level forms are separated by blank lines (at least one empty line).         *)
+(* Within expressions and block bodies, all whitespace is equivalent.              *)
+
+(* === Program structure === *)
+(* Top-level forms separated by at least one blank line *)
+program = <_>? top-form (<blank-line> top-form)* <_>?
+<blank-line> = #'[ \t]*\n([ \t]*(;[^\n]*)?\n)*[\s]*'
+(* General whitespace — spaces, tabs, newlines, commas, and comments *)
+<_> = #'[\s,]*(;[^\n]*[\s,]*)*[\s,]+'
+(* Inline whitespace — spaces and tabs only, NOT newlines *)
+(* Used around operators so that multi-line body doesn't break expressions *)
+<sp> = #'[ \t,]+'
+
+(* === Top-level forms === *)
+<top-form> = ns-form | def-form | defn-form | sexp | expr
+
+(* === Namespace declaration === *)
+ns-form = <'ns'> <_> symbol (<_> (string | sexp))* <_> <'end'>
+
+(* === S-expression passthrough === *)
+sexp = <'('> sexp-inner* <')'>
+<sexp-inner> = sexp | sexp-vec | sexp-map | sexp-set | sexp-anon-fn | sexp-regex | sexp-string | sexp-comment | sexp-atom | <#'[\s,]+'>
+sexp-vec = <'['> sexp-inner* <']'>
+sexp-map = <'{'> sexp-inner* <'}'>
+sexp-set = <'#{'> sexp-inner* <'}'>
+(* #(...) anonymous fn: keep # attached to parens so read-string sees #(...) not # (...) *)
+sexp-anon-fn = <'#('> sexp-inner* <')'>
+(* sexp-regex: regex literal #"..." — must come before sexp-string to prevent # splitting off *)
+sexp-regex = #'#"[^"\\]*(?:\\.[^"\\]*)*"'
+(* sexp-string: full Clojure string literal to avoid sexp-atom splitting on escaped quotes *)
+sexp-string = #'"[^"\\]*(?:\\.[^"\\]*)*"'
+(* sexp-comment: Clojure line comment — stripped during reconstruction to avoid ; eating the rest *)
+sexp-comment = #';[^\n]*'
+(* sexp-atom: non-whitespace, non-bracket, non-quote, non-semicolon chars.          *)
+(* Negative lookahead prevents #( (anon-fn), #{ (set), #" (regex) from being split *)
+sexp-atom = #'(?!#[\(\{"])[^\s\(\)\[\]\{\}";]+'
+
+(* === Definitions === *)
+def-form = def-kw <_> meta-symbol <_>? <':='> <_>? expr
+<meta-symbol> = metadata | symbol
+def-kw = 'def' | 'defonce'
+
+defn-form = defn-kw <_> meta-symbol <_>? params <_>? <':'> body <_> <'end'>
+          | defn-kw <_> meta-symbol <_> multi-arity+ <_>? <'end'>
+defn-kw = 'defn' | 'defn-' | 'defmacro'
+
+multi-arity = <_>? params <_>? <':'> body
+
+params = <'('> <_>? (param (<_>? <','> <_>? param)*)? <_>? <')'>
+<param> = amp-param | metadata | symbol | vector-literal | map-literal
+amp-param = <'&'> <_>? (symbol | vector-literal | map-literal)
+
+(* === Body: one or more expressions separated by newlines === *)
+(* Within a body, each line is one expression. Multi-line expressions *)
+(* work via pipe operators (|> / .>) which consume the leading newline. *)
+<body> = (<eol> expr)+
+(* At least one newline, with optional surrounding spaces/tabs *)
+<eol> = #'[ \t]*\n[ \t]*(\n[ \t]*)*'
+      | <sp>? #';[^\n]*' #'[ \t]*\n[ \t]*(\n[ \t]*)*'
+
+(* === Expressions — precedence from lowest to highest === *)
+<expr> = pipe-expr
+
+pipe-expr = or-expr (<_> pipe-op <sp> pipe-step)+
+          | or-expr
+pipe-op = '|>' | '.>'
+<pipe-step> = pipe-method | or-expr
+pipe-method = <'.'> ident call-args
+
+or-expr = and-expr (<sp> <'or'> <sp> and-expr)+
+        | and-expr
+
+and-expr = comp-expr (<sp> <'and'> <sp> comp-expr)+
+         | comp-expr
+
+comp-expr = add-expr <sp> comp-op <sp> add-expr
+          | add-expr
+(* == is deliberately excluded: it's Clojure's numeric equality, rarely used, *)
+(* and overlaps with operator-symbol. Use ==(a, b) as a function call instead. *)
+comp-op = '<=' | '>=' | 'not=' | '=' | '<' | '>'
+
+add-expr = mul-expr (<sp> add-op <sp> mul-expr)+
+         | mul-expr
+add-op = '+' | '-'
+
+mul-expr = unary-expr (<sp> mul-op <sp> unary-expr)+
+         | unary-expr
+mul-op = '*' | '/' | 'mod' | 'rem'
+
+<unary-expr> = not-expr | neg-expr | deref-expr | throw-expr | recur-expr | postfix-expr
+not-expr = <'not'> <sp> unary-expr
+neg-expr = <'-'> postfix-expr
+deref-expr = <'@'> unary-expr
+throw-expr = <'throw'> <sp> unary-expr
+recur-expr = <'recur'> call-args
+
+(* === Postfix: method calls and field access === *)
+postfix-expr = primary (method-call | field-access)+
+             | primary
+method-call = <'.'> ident call-args
+field-access = <'.-'> ident
+ident = #'[a-zA-Z_][a-zA-Z0-9_*?!\x27#$]*(-[a-zA-Z0-9_*?!\x27#$]+)*'
+
+(* === Primary expressions === *)
+<primary> = block-expr
+          | new-expr
+          | call-expr
+          | anon-fn
+          | quote-form | var-form
+          | metadata
+          | vector-literal | map-literal | set-literal
+          | number | string | keyword | regex | char-literal
+          | nil-literal | bool-literal
+          | symbol
+          | paren-expr
+
+paren-expr = <'('> <_>? expr <_>? <')'>
+
+new-expr = <'new'> <_> class-name call-args
+<class-name> = #'[a-zA-Z_][a-zA-Z0-9_$]*(\.[a-zA-Z_][a-zA-Z0-9_$]*)*'
+
+call-expr = callable call-args
+<callable> = keyword | symbol | set-literal | map-literal | vector-literal | paren-expr
+
+call-args = <'('> <_>? (expr (<_>? <','> <_>? expr)*)? <_>? <')'>
+
+(* === Anonymous function === *)
+anon-fn = <'fn'> (<_> fn-name)? <_>? params <_>? <':'> body <_> <'end'>
+        | <'fn'> (<_> fn-name)? <_> multi-arity+ <_>? <'end'>
+fn-name = !reserved #'[a-zA-Z_*!?\-][a-zA-Z0-9_*+!\-?/$#><=%&\x27]*'
+
+(* === Block expressions === *)
+<block-expr> = if-expr | when-expr | let-expr | loop-expr | for-expr
+             | do-expr | try-expr | cond-expr | condp-expr | case-expr
+
+if-expr = if-kw <_> expr <_>? <':'> body (<_> <'else'> <_>? <':'> body)? <_> <'end'>
+        | if-bind-kw <_> bindings <_>? <':'> body (<_> <'else'> <_>? <':'> body)? <_> <'end'>
+if-kw = 'if' | 'if-not'
+if-bind-kw = 'if-let' | 'if-some'
+
+when-expr = when-kw <_> expr <_>? <':'> body <_> <'end'>
+          | when-bind-kw <_> bindings <_>? <':'> body <_> <'end'>
+when-kw = 'when' | 'when-not'
+when-bind-kw = 'when-let' | 'when-some' | 'when-first'
+
+let-expr = let-kw <_> bindings <_>? <':'> body <_> <'end'>
+let-kw = 'let' | 'binding' | 'with-open' | 'with-redefs'
+
+loop-expr = <'loop'> <_> bindings <_>? <':'> body <_> <'end'>
+           | <'loop'> <_>? <':'> body <_> <'end'>
+
+cond-expr = <'cond'> <_>? <':'> (<_> cond-clause)+ <_> <'end'>
+cond-clause = expr <_>? <'=>'> <_>? expr
+
+condp-expr = <'condp'> <_> expr <_> expr <_>? <':'> (<_> cond-clause)+ (<_> <'else'> <_>? <'=>'> <_>? expr)? <_> <'end'>
+
+case-expr = <'case'> <_> expr <_>? <':'> (<_> case-clause)+ (<_> <'else'> <_>? <'=>'> <_>? expr)? <_> <'end'>
+case-clause = expr <_>? <'=>'> <_>? expr
+
+for-expr = for-kw <_> for-bindings <_>? <':'> body <_> <'end'>
+for-kw = 'for' | 'doseq' | 'dotimes'
+
+for-bindings = for-binding (<_>? <','> <_>? for-binding)*
+for-binding = for-target <_> <'in'> <_> expr
+            | for-modifier <_> expr
+<for-target> = metadata | symbol | vector-literal | map-literal
+(* Note: 'when', 'while', 'let' are also block keywords but are unambiguous here *)
+(* because for-modifier only appears inside for-bindings after a comma.           *)
+for-modifier = 'when' | 'while' | 'let'
+
+do-expr = <'do'> <_>? <':'> body <_> <'end'>
+        | <'do'> <_>? <':'> <_> <'end'>
+
+try-expr = <'try'> <_>? <':'> body (<_> catch-clause)* (<_> finally-clause)? <_> <'end'>
+catch-clause = <'catch'> <_> symbol <_> symbol <_>? <':'> body
+finally-clause = <'finally'> <_>? <':'> body
+
+(* === Bindings === *)
+bindings = binding (<_>? <','> <_>? binding)*
+binding = bind-target <_>? <':='> <_>? expr
+<bind-target> = metadata | symbol | vector-literal | map-literal
+
+(* === Collections === *)
+vector-literal = <'['> <_>? (vec-elem (<_>? <','> <_>? vec-elem)*)? <_>? <']'>
+<vec-elem> = amp-param | expr
+
+map-literal = <'{'> <_>? (map-entry (<_>? <','> <_>? map-entry)*)? <_>? <'}'>
+map-entry = expr <_> expr
+
+set-literal = <'#{'> <_>? (expr (<_>? <','> <_>? expr)*)? <_>? <'}'>
+
+(* === Reader macros === *)
+quote-form = <"'"> (minus-symbol | sexp | primary)
+minus-symbol = '-' !#'[a-zA-Z0-9_>]'
+var-form = <"#'"> symbol
+
+(* === Metadata === *)
+metadata = <'^'> metadata-value <_>? primary
+<metadata-value> = keyword | symbol | string | map-literal
+
+(* === Atoms === *)
+nil-literal = 'nil' !#'[a-zA-Z0-9_*?!\x27-]'
+bool-literal = ('true' | 'false') !#'[a-zA-Z0-9_*?!\x27-]'
+
+(* Numbers: try floats before ints to avoid partial match *)
+number = hex-number | float-number | ratio-number | int-number
+<hex-number> = #'0[xX][0-9a-fA-F]+'
+<float-number> = #'-?[0-9]+\.[0-9]+(E-?[0-9]+)?M?'
+<ratio-number> = #'-?[0-9]+/[0-9]+'
+<int-number> = #'-?[0-9]+N?' !#'[a-zA-Z_]'
+
+string = #'"[^"\\]*(?:\\.[^"\\]*)*"'
+
+keyword = #':[:a-zA-Z_*+!\-?<>=][a-zA-Z0-9_.*/+!\-?<>=]*'
+
+regex = #'#"[^"\\]*(?:\\.[^"\\]*)*"'
+
+char-literal = #'\\(newline|space|tab|backspace|formfeed|return|u[0-9a-fA-F]{4}|.)'
+
+(* === Symbols === *)
+(* Broad match via Clojure reader in transform. No dots in main regex — *)
+(* dots handled by dotted-symbol (java.util.HashMap) and dotted-ns-symbol (java.util.UUID/foo). *)
+symbol = escaped-symbol
+       | !reserved dotted-ns-symbol
+       | !reserved dotted-symbol
+       | !reserved #'[a-zA-Z_*!?][a-zA-Z0-9_*+!\-?/$#><=%&\x27]*'
+       | !reserved #'->[a-zA-Z_*!?][a-zA-Z0-9_*+!\-?/$#><=%&\x27]*'
+       | operator-symbol
+(* Backtick-escaped symbols for reserved words used as identifiers: `end`, `if`, etc. *)
+escaped-symbol = <'`'> #'[a-zA-Z_.*!?\-][a-zA-Z0-9_.*+!\-?/$#><=%&\x27]*' <'`'>
+(* Dotted namespace-qualified: java.util.UUID/nameUUIDFromBytes, clojure.core.async/<!! *)
+dotted-ns-symbol = #'[a-zA-Z_][a-zA-Z0-9_$\-]*(\.[a-zA-Z_][a-zA-Z0-9_$\-]*)+\/[a-zA-Z_*+!\-?/<>=][a-zA-Z0-9_*+!\-?/$#><=%&\x27]*'
+dotted-symbol = #'[a-zA-Z_][a-zA-Z0-9_$\-]*(\.[a-zA-Z_][a-zA-Z0-9_$\-]*)+' !<'('>
+(* Operator symbols: +, -, *, etc. as values (e.g. passed to reduce) *)
+(* Single +, *, /, >, < are operators-as-values. Single - is excluded (it's unary neg). *)
+(* Multi-char: >=, <=, ->, ->>, <!, >!, <!!, >!! etc. *)
+operator-symbol = #'[<>]!{1,2}'
+                | #'[+*/><]=?'
+                | '==' | '=' | 'not=' | '->' | '->>'
+                | #'[+\-*/><][+\-*/><]+'
+
+(* Reserved words — negative lookahead prevents matching prefixes *)
+reserved = ('defn-' | 'defn' | 'fn-' | 'fn'
+           | 'defmacro' | 'defonce' | 'def'
+           | 'if-let' | 'if-some' | 'if-not' | 'if'
+           | 'when-not' | 'when-let' | 'when-some' | 'when-first' | 'when'
+           | 'with-open' | 'with-redefs'
+           | 'let' | 'binding'
+           | 'loop' | 'cond' | 'condp' | 'case'
+           | 'do' | 'try' | 'catch' | 'finally'
+           | 'doseq' | 'dotimes' | 'for' | 'while'
+           | 'end' | 'else' | 'new' | 'not' | 'throw' | 'recur'
+           | 'ns' | 'nil' | 'true' | 'false'
+           | 'and' | 'or' | 'mod' | 'rem'
+           | 'in')
+           !#'[a-zA-Z0-9_*?!\x27-]'
