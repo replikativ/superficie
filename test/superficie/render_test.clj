@@ -119,3 +119,17 @@
       (is (str/includes? result "def a := 1"))
       (is (str/includes? result "def b := 2"))
       (is (str/includes? result "defn f(x):")))))
+
+(deftest test-reader-conditionals
+  (testing "top-level #? preserved verbatim"
+    (is (= "#?(:clj (def x 1) :cljs (def x 2))"
+           (render/render-string "#?(:clj (def x 1) :cljs (def x 2))"))))
+  (testing "form containing #? falls back to sexp passthrough"
+    (let [result (render/render-string "(defn foo [s]\n  #?(:clj (Integer/parseInt s)\n     :cljs (js/parseInt s 10)))")]
+      (is (str/includes? result "#?(:clj"))
+      (is (str/includes? result ":cljs"))
+      (is (not (str/includes? result "read-string")))))
+  (testing "pure forms alongside #? still render as superficie"
+    (let [result (render/render-string "(defn pure [x] (inc x))\n\n(defn mixed [s]\n  #?(:clj (.toUpperCase s)\n     :cljs (.toUpperCase s)))")]
+      (is (str/includes? result "defn pure(x):"))
+      (is (str/includes? result "#?(:clj")))))

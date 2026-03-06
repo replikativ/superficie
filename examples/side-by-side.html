@@ -286,6 +286,33 @@ end`
   (greet "world")
   (+ 1 2 3)
   (println "scratch pad"))`
+  },
+  {
+    title: ".cljc reader conditionals",
+    clojure: `(defn parse-int [s]
+  #?(:clj (Integer/parseInt s)
+     :cljs (js/parseInt s 10)))
+
+(defn upper [s]
+  (str/upper-case s))
+
+(defn process [data]
+  (->> data
+       (filter :active)
+       (map :name)))`,
+    superficie: `(defn parse-int [s]
+  #?(:clj (Integer/parseInt s)
+     :cljs (js/parseInt s 10)))
+
+defn upper(s):
+  str/upper-case(s)
+end
+
+defn process(data):
+  data
+    |> filter(:active)
+    |> map(:name)
+end`
   }
 ];
 

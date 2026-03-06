@@ -633,6 +633,14 @@
         (when (and (node/inner? n) (not= tag :quote))
           (some contains-syntax-quote? (node/children n))))))
 
+(defn- contains-reader-conditional?
+  "Check if a node tree contains reader conditional (#? or #?@) nodes."
+  [n]
+  (let [tag (node/tag n)]
+    (or (= :reader-macro tag)
+        (when (node/inner? n)
+          (some contains-reader-conditional? (node/children n))))))
+
 (defn- sexp-passthrough
   "Emit a node as raw Clojure sexp, collapsing blank lines to avoid
    the surface syntax grammar treating them as top-level separators."
@@ -651,10 +659,12 @@
     ;; the surface grammar (since #_ can appear anywhere in Clojure).
     ;; Inline #_ within forms is handled by sexp passthrough of the parent.
     :uneval nil
-    :reader-macro (sexp-passthrough n)
-    ;; Regular forms — check for syntax-quote/unquote before transforming,
-    ;; as node/sexpr expands these and mangles macro bodies
-    (if (contains-syntax-quote? n)
+    ;; Reader macros (#?, #?@, tagged literals): preserve literally
+    :reader-macro (node/string n)
+    ;; Regular forms — check for syntax-quote/unquote or reader conditionals
+    ;; before transforming, as node/sexpr mangles these
+    (if (or (contains-syntax-quote? n)
+            (contains-reader-conditional? n))
       (sexp-passthrough n)
       (let [fallback (sexp-passthrough n)]
         (try
