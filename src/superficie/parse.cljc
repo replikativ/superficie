@@ -1,12 +1,19 @@
 (ns superficie.parse
   "Parses .sup surface syntax into Clojure S-expressions.
    This is the .sup -> Clojure direction."
-  (:require [instaparse.core :as insta]
-            [clojure.java.io :as io]
+  (:require [instaparse.core :as insta #?(:cljs :refer-macros :clj :refer) [defparser]]
+            #?(:clj [clojure.java.io :as io])
+            #?(:cljs [cljs.reader :as cljs-reader])
             [clojure.string :as str]))
 
-(def parser
-  (insta/parser (io/resource "superficie.ebnf")))
+#?(:clj (def parser (insta/parser (io/resource "superficie.ebnf")))
+   :cljs (defparser parser "resources/superficie.ebnf"))
+
+(defn- read-sym
+  "Read a string as a Clojure value using the platform reader."
+  [s]
+  #?(:clj (read-string s)
+     :cljs (cljs-reader/read-string s)))
 
 (defn parse-raw
   "Parse a .sup string into a raw parse tree."
@@ -38,24 +45,29 @@
   "Read a reconstructed S-expression string."
   [& nodes]
   (let [s (str "(" (str/join " " (map reconstruct-sexp-node nodes)) ")")]
-    (read-string s)))
+    (read-sym s)))
 
 (defn- read-sexp-anon-fn
   "Read a reconstructed #(...) anonymous function string."
   [& nodes]
   (let [s (str "#(" (str/join " " (map reconstruct-sexp-node nodes)) ")")]
-    (read-string s)))
+    (read-sym s)))
 
 ;; === Number parsing ===
 
 (defn- parse-number [s]
   (cond
-    (re-matches #"0[xX][0-9a-fA-F]+" s) (Long/parseLong (subs s 2) 16)
-    (str/ends-with? s "N") (bigint (subs s 0 (dec (count s))))
-    (str/ends-with? s "M") (bigdec (subs s 0 (dec (count s))))
-    (str/includes? s "/") (let [[n d] (str/split s #"/")] (/ (Long/parseLong n) (Long/parseLong d)))
-    (str/includes? s ".") (Double/parseDouble s)
-    :else (Long/parseLong s)))
+    (re-matches #"0[xX][0-9a-fA-F]+" s) #?(:clj (Long/parseLong (subs s 2) 16)
+                                           :cljs (js/parseInt (subs s 2) 16))
+    (str/ends-with? s "N") #?(:clj (bigint (subs s 0 (dec (count s))))
+                              :cljs (js/parseInt (subs s 0 (dec (count s)))))
+    (str/ends-with? s "M") #?(:clj (bigdec (subs s 0 (dec (count s))))
+                              :cljs (js/parseFloat (subs s 0 (dec (count s)))))
+    (str/includes? s "/") (let [[n d] (str/split s #"/")]
+                            (/ #?(:clj (Long/parseLong n) :cljs (js/parseInt n))
+                               #?(:clj (Long/parseLong d) :cljs (js/parseInt d))))
+    (str/includes? s ".") #?(:clj (Double/parseDouble s) :cljs (js/parseFloat s))
+    :else #?(:clj (Long/parseLong s) :cljs (js/parseInt s))))
 
 ;; === Core transform map ===
 ;; insta/transform walks bottom-up, so children are already transformed
@@ -64,17 +76,17 @@
 (def ^:private xform
   {:program       (fn [& forms] (vec forms))
 
-   ;; Atoms — use Clojure reader for symbol parsing
-   :symbol          (fn [s] (if (string? s) (read-string s) s))
-   :escaped-symbol  (fn [s] (read-string s))
-   :dotted-symbol   (fn [s] (read-string s))
-   :dotted-ns-symbol (fn [s] (read-string s))
-   :operator-symbol (fn [s] (read-string s))
+   ;; Atoms — use platform reader for symbol parsing
+   :symbol          (fn [s] (if (string? s) (read-sym s) s))
+   :escaped-symbol  (fn [s] (read-sym s))
+   :dotted-symbol   (fn [s] (read-sym s))
+   :dotted-ns-symbol (fn [s] (read-sym s))
+   :operator-symbol (fn [s] (read-sym s))
    :number        (fn [s] (parse-number s))
-   :string        (fn [s] (read-string s))
-   :keyword       (fn [s] (read-string s))
+   :string        (fn [s] (read-sym s))
+   :keyword       (fn [s] (read-sym s))
    :regex         (fn [s] (re-pattern (subs s 2 (dec (count s)))))
-   :char-literal  (fn [s] (read-string s))
+   :char-literal  (fn [s] (read-sym s))
    :nil-literal   (constantly nil)
    :bool-literal  (fn [s] (= s "true"))
 
@@ -298,7 +310,8 @@
                             (string? meta-val)  {:tag meta-val}
                             (map? meta-val)     meta-val
                             :else               {})]
-                    (if (instance? clojure.lang.IObj target)
+                    (if #?(:clj (instance? clojure.lang.IObj target)
+                           :cljs (implements? IWithMeta target))
                       (with-meta target m)
                       target)))
 
@@ -328,7 +341,8 @@
           (first result)
           result)))))
 
-(defn parse-file
-  "Parse a .sup file and return Clojure S-expressions."
-  [path]
-  (parse-string (slurp path)))
+#?(:clj
+   (defn parse-file
+     "Parse a .sup file and return Clojure S-expressions."
+     [path]
+     (parse-string (slurp path))))

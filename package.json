@@ -1,0 +1,9 @@
+{
+  "name": "superficie",
+  "version": "1.0.0",
+  "description": "ClojureScript test runner",
+  "devDependencies": {
+    "shadow-cljs": "^2.26.0"
+  },
+  "license": "Apache-2.0"
+}

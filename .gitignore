@@ -4,3 +4,6 @@ target/
 *.class
 .clj-kondo/
 .lsp/
+.shadow-cljs/
+out/
+node_modules/

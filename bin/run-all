@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+
+set -o errexit
+set -o pipefail
+
+./bin/run-unittests
+
+echo
+echo
+
+./bin/run-cljstests

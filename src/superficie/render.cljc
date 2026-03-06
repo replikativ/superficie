@@ -5,7 +5,12 @@
             [rewrite-clj.node :as node]
             [clojure.string :as str]
             [superficie.resolve :as resolve]
-            [superficie.parse :as parse]))
+            [superficie.parse :as parse]
+            [instaparse.core :as instaparse]))
+
+(defn- regex? [x]
+  #?(:clj (instance? java.util.regex.Pattern x)
+     :cljs (regexp? x)))
 
 ;; --- Precedence levels ---
 ;; Higher number = tighter binding
@@ -439,7 +444,7 @@
     (string? form) (pr-str form)
     (keyword? form) (str form)
     (char? form) (pr-str form)
-    (instance? java.util.regex.Pattern form) (str "#\"" form "\"")
+    (regex? form) (str "#\"" form "\"")
     (symbol? form) (escape-symbol form)
     (vector? form) (str "[" (str/join ", " (map render-data form)) "]")
     (map? form) (str "{" (str/join ", " (map (fn [[k v]] (str (render-data k) " " (render-data v))) form)) "}")
@@ -461,7 +466,7 @@
       (string? form) (pr-str form)
       (keyword? form) (str form)
       (char? form) (pr-str form)
-      (instance? java.util.regex.Pattern form) (str "#\"" form "\"")
+      (regex? form) (str "#\"" form "\"")
 
     ;; Symbols (with optional metadata)
       (symbol? form)
@@ -609,7 +614,7 @@
                   (render-call ctx head args)))))))
 
       :else (pr-str form))
-    (catch Exception _
+    (catch #?(:clj Exception :cljs :default) _
       ;; Fallback for forms we can't render (e.g. expanded syntax-quote internals)
       (pr-str form))))
 
@@ -671,10 +676,10 @@
           (let [rendered (render-form ctx (node/sexpr n))]
             ;; Validate roundtrip: if the rendered form doesn't parse back,
             ;; fall back to sexp passthrough for correctness
-            (if (instaparse.core/failure? (parse/parse-raw rendered))
+            (if (instaparse/failure? (parse/parse-raw rendered))
               fallback
               rendered))
-          (catch Exception _
+          (catch #?(:clj Exception :cljs :default) _
             fallback))))))
 
 ;; --- Top-level API ---
