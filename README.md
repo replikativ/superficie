@@ -2,7 +2,6 @@
 
 [![CircleCI](https://circleci.com/gh/replikativ/superficie.svg?style=shield)](https://circleci.com/gh/replikativ/superficie)
 [![Clojars](https://img.shields.io/clojars/v/org.replikativ/superficie.svg)](https://clojars.org/org.replikativ/superficie)
-[![License](https://img.shields.io/badge/license-EPL%202.0-blue.svg)](https://www.eclipse.org/legal/epl-2.0/)
 
 **Surface syntax for Clojure** — a bidirectional renderer that translates Clojure S-expressions into familiar, readable syntax.
 
