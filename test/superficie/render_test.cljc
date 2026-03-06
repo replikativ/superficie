@@ -133,3 +133,31 @@
     (let [result (render/render-string "(defn pure [x] (inc x))\n\n(defn mixed [s]\n  #?(:clj (.toUpperCase s)\n     :cljs (.toUpperCase s)))")]
       (is (str/includes? result "defn pure(x):"))
       (is (str/includes? result "#?(:clj")))))
+
+;; let-flattening: tail lets rendered as statements, not blocks
+(deftest test-let-flattening
+  (let [ctx {:refers {} :aliases {} :excludes #{}}]
+    (testing "tail let in defn is flattened"
+      (let [result (render/render-form ctx '(defn foo [x] (let [y 1] (+ x y))))]
+        (is (str/includes? result "let y := 1"))
+        (is (not (str/includes? result "end\nend")))
+        (is (not (str/includes? result "let y := 1:")))))
+    (testing "nested tail lets are merged"
+      (let [result (render/render-form ctx '(defn foo [x] (let [a 1] (let [b 2] (+ a b)))))]
+        (is (str/includes? result "let a := 1"))
+        (is (str/includes? result "let b := 2"))
+        (is (not (str/includes? result "let a := 1:")))))
+    (testing "non-tail let keeps block syntax"
+      (let [result (render/render-form ctx '(defn foo [x] (let [y 1] (use y)) (other)))]
+        (is (str/includes? result "let y := 1:"))
+        (is (str/includes? result "end\n  other()"))))
+    (testing "let in if-else branches is flattened"
+      (let [result (render/render-form ctx '(if true (let [x 1] x) (let [y 2] y)))]
+        (is (str/includes? result "let x := 1"))
+        (is (not (str/includes? result "let x := 1:")))
+        (is (str/includes? result "let y := 2"))
+        (is (not (str/includes? result "let y := 2:")))))
+    (testing "binding/with-open are not flattened"
+      (let [result (render/render-form ctx '(defn foo [] (binding [*x* 1] (bar))))]
+        (is (str/includes? result "binding *x* := 1:"))
+        (is (str/includes? result "end\nend"))))))

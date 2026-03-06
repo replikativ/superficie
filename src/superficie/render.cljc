@@ -153,6 +153,31 @@
                 (str (render-form ctx k) " := " (render-form ctx v))))
          (str/join ", "))))
 
+(defn- render-body-flat
+  "Render a body, flattening tail let forms into let-statements.
+   A tail (let [x 1 y 2] body...) becomes:
+     let x := 1
+     let y := 2
+     body..."
+  [ctx body]
+  (let [last-expr (last body)
+        prefix (butlast body)]
+    (if (and (sequential? last-expr)
+             (symbol? (first last-expr))
+             (= 'let (first last-expr)))
+      ;; Don't flatten binding/with-open/with-redefs, only let
+      (str (when (seq prefix)
+             (str (str/join "\n" (render-children ctx prefix)) "\n"))
+           (let [[_ bindings & let-body] last-expr]
+             (str (->> (partition 2 bindings)
+                       (map (fn [[k v]]
+                              (str "let " (render-form ctx k) " := " (render-form ctx v))))
+                       (str/join "\n"))
+                  "\n"
+                  (render-body-flat ctx let-body))))
+      ;; No tail let — render normally
+      (str/join "\n" (render-children ctx body)))))
+
 (defn- render-defn
   "Render defn/defn-/defmacro."
   [ctx form-name parts]
@@ -175,7 +200,7 @@
       (let [arities (for [arity rest-parts]
                       (let [[args & body] arity]
                         (str "  (" (render-params ctx args) "):\n"
-                             (indent 4 (str/join "\n" (render-children ctx body))))))]
+                             (indent 4 (render-body-flat ctx body)))))]
         (str (when docstring
                (str (->> (str/split-lines docstring)
                          (map #(str ";; " %))
@@ -193,7 +218,7 @@
                     "\n"))
              kw " " (render-form ctx name-sym)
              "(" (render-params ctx args) "):\n"
-             (indent 2 (str/join "\n" (render-children ctx body)))
+             (indent 2 (render-body-flat ctx body))
              "\nend")))))
 
 (defn- render-if
@@ -208,10 +233,10 @@
                    (render-bindings ctx test)
                    (render-form ctx test))]
     (str (str form-name) " " test-str ":\n"
-         (indent 2 (render-form ctx then))
+         (indent 2 (render-body-flat ctx [then]))
          (when has-else?
            (str "\nelse:\n"
-                (indent 2 (render-form ctx else))))
+                (indent 2 (render-body-flat ctx [else]))))
          "\nend")))
 
 (defn- render-when
@@ -223,14 +248,14 @@
                    (render-bindings ctx test)
                    (render-form ctx test))]
     (str (str form-name) " " test-str ":\n"
-         (indent 2 (str/join "\n" (render-children ctx body)))
+         (indent 2 (render-body-flat ctx body))
          "\nend")))
 
 (defn- render-let
   "Render let/binding/with-open/with-redefs."
   [ctx form-name [bindings & body]]
   (str (str form-name) " " (render-bindings ctx bindings) ":\n"
-       (indent 2 (str/join "\n" (render-children ctx body)))
+       (indent 2 (render-body-flat ctx body))
        "\nend"))
 
 (defn- render-cond
@@ -266,7 +291,7 @@
   "Render do block."
   [ctx _form-name body]
   (str "do:\n"
-       (indent 2 (str/join "\n" (render-children ctx body)))
+       (indent 2 (render-body-flat ctx body))
        "\nend"))
 
 (defn- render-fn
@@ -283,7 +308,7 @@
       (let [arities (for [arity rest-parts]
                       (let [[args & body] arity]
                         (str "  (" (render-params ctx args) "):\n"
-                             (indent 4 (str/join "\n" (render-children ctx body))))))]
+                             (indent 4 (render-body-flat ctx body)))))]
         (str "fn" (when fn-name (str " " fn-name)) "\n"
              (str/join "\n" arities)
              "\nend"))
@@ -291,7 +316,7 @@
         (str "fn"
              (when fn-name (str " " fn-name))
              "(" (render-params ctx args) "):\n"
-             (indent 2 (str/join "\n" (render-children ctx body)))
+             (indent 2 (render-body-flat ctx body))
              "\nend")))))
 
 (defn- render-loop
@@ -299,10 +324,10 @@
   [ctx _form-name [bindings & body]]
   (if (empty? bindings)
     (str "loop:\n"
-         (indent 2 (str/join "\n" (render-children ctx body)))
+         (indent 2 (render-body-flat ctx body))
          "\nend")
     (str "loop " (render-bindings ctx bindings) ":\n"
-         (indent 2 (str/join "\n" (render-children ctx body)))
+         (indent 2 (render-body-flat ctx body))
          "\nend")))
 
 (defn- render-try
@@ -315,10 +340,10 @@
                      (let [[_ exc-type binding & catch-body] form]
                        (str "catch " (render-form ctx exc-type) " "
                             (render-form ctx binding) ":\n"
-                            (indent 2 (str/join "\n" (render-children ctx catch-body)))))
+                            (indent 2 (render-body-flat ctx catch-body))))
                      (if (and (sequential? form) (= 'finally (first form)))
                        (str "finally:\n"
-                            (indent 2 (str/join "\n" (render-children ctx (rest form)))))
+                            (indent 2 (render-body-flat ctx (rest form))))
                        (str "  " (render-form ctx form))))))
             (str/join "\n"))
        "\nend"))
@@ -341,7 +366,7 @@
                       (recur rest (conj result (str (render-form ctx a) " in "
                                                     (render-form ctx b))))))))]
     (str (str form-name) " " (str/join ", " parts) ":\n"
-         (indent 2 (str/join "\n" (render-children ctx body)))
+         (indent 2 (render-body-flat ctx body))
          "\nend")))
 
 (defn- render-def

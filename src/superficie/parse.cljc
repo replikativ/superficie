@@ -73,6 +73,22 @@
 ;; insta/transform walks bottom-up, so children are already transformed
 ;; when the parent rule fires.
 
+(defn- wrap-body-lets
+  "Process body elements: convert let-statement markers into nested (let [...] ...) forms.
+   A let-statement scopes to the end of the enclosing block."
+  [elems]
+  (loop [items (seq elems), acc []]
+    (if (nil? items)
+      acc
+      (let [item (first items)]
+        (if (and (vector? item) (= ::let-stmt (first item)))
+          ;; Collect consecutive let-statements, merge bindings
+          (let [[lets rest] (split-with #(and (vector? %) (= ::let-stmt (first %))) items)
+                bindings (vec (mapcat #(subvec % 1) lets))
+                remaining (wrap-body-lets (vec rest))]
+            (conj acc (apply list 'let bindings remaining)))
+          (recur (next items) (conj acc item)))))))
+
 (def ^:private xform
   {:program       (fn [& forms] (vec forms))
 
@@ -201,15 +217,27 @@
    :call-expr  (fn [f args] (apply list f args))
    :call-args  (fn [& args] (vec args))
 
+   ;; Body — processes let-statements into nested let forms
+   :body       (fn [& elems] (wrap-body-lets elems))
+
+   ;; Let-statement (body-level let without block)
+   :let-statement (fn [binding-pair] (into [::let-stmt] binding-pair))
+
    ;; Definitions
    :def-form   (fn [kw sym val] (list (symbol kw) sym val))
    :def-kw     identity
    :defn-form  (fn [kw sym & rest]
                  (let [form-sym (case kw "defn" 'defn "defn-" 'defn- "defmacro" 'defmacro "e/defn" 'e/defn)]
-                   (apply list form-sym sym rest)))
+                   ;; Single arity: rest = (params body-seq)
+                   ;; Multi arity: rest = (arity1 arity2 ...)
+                   (if (vector? (first rest))
+                     ;; Single arity: params then body sequence
+                     (apply list form-sym sym (first rest) (second rest))
+                     ;; Multi arity: list of arity forms
+                     (apply list form-sym sym rest))))
    :defn-kw    identity
 
-   :multi-arity (fn [params & body]
+   :multi-arity (fn [params body]
                   (apply list params body))
 
    :params     (fn [& ps] (vec (mapcat #(if (and (seq? %) (= '& (first %)))
@@ -220,38 +248,43 @@
 
    ;; Anonymous fn
    :anon-fn    (fn [& parts]
-                 ;; parts might start with fn-name or params/multi-arity
-                 (apply list 'fn parts))
+                 (let [[fn-name rest-parts] (if (symbol? (first parts))
+                                              [(first parts) (rest parts)]
+                                              [nil parts])
+                       ;; Single arity: rest-parts = (params body-seq)
+                       ;; Multi arity: rest-parts = (arity1 arity2 ...)
+                       expanded (if (vector? (first rest-parts))
+                                  (cons (first rest-parts) (second rest-parts))
+                                  rest-parts)]
+                   (apply list 'fn (if fn-name (cons fn-name expanded) expanded))))
    :fn-name    (fn [s] (symbol s))
 
    ;; Block expressions
-   :if-expr    (fn [kw & parts]
-                 (apply list (symbol kw) parts))
+   :if-expr    (fn [kw test then-body & [else-body]]
+                 (if else-body
+                   (apply list (symbol kw) test (concat then-body else-body))
+                   (apply list (symbol kw) test then-body)))
    :if-kw      identity
    :if-bind-kw identity
 
-   :when-expr  (fn [kw & parts]
-                 (apply list (symbol kw) parts))
+   :when-expr  (fn [kw test body]
+                 (apply list (symbol kw) test body))
    :when-kw    identity
    :when-bind-kw identity
 
-   :let-expr   (fn [kw bindings & body]
+   :let-expr   (fn [kw bindings body]
                  (apply list (symbol kw) bindings body))
    :let-kw     identity
 
-   :loop-expr  (fn [& parts]
-                 (if (vector? (first parts))
-                   ;; Has bindings
-                   (apply list 'loop (first parts) (rest parts))
-                   ;; No bindings (loop : body end)
-                   (apply list 'loop [] parts)))
+   :loop-expr  (fn
+                 ([bindings body] (apply list 'loop bindings body))
+                 ([body] (apply list 'loop [] body)))
 
    :cond-expr  (fn [& clauses]
                  (apply list 'cond (mapcat identity clauses)))
    :cond-clause (fn [test val] [test val])
 
    :condp-expr (fn [pred expr & parts]
-                 ;; parts = cond-clause pairs + optional else value
                  (let [clauses (filter vector? parts)
                        else-val (first (filter #(not (vector? %)) parts))]
                    (apply list 'condp pred expr
@@ -259,7 +292,6 @@
                                   (when else-val [else-val])))))
 
    :case-expr  (fn [dispatch & parts]
-                 ;; parts = clause pairs + optional else value
                  (let [clauses (filter vector? parts)
                        else-val (first (filter #(not (vector? %)) parts))]
                    (apply list 'case dispatch
@@ -267,20 +299,20 @@
                                   (when else-val [else-val])))))
    :case-clause (fn [test val] [test val])
 
-   :for-expr   (fn [kw bindings & body]
+   :for-expr   (fn [kw bindings body]
                  (apply list (symbol kw) bindings body))
    :for-kw     identity
    :for-bindings (fn [& bindings] (vec (mapcat identity bindings)))
    :for-binding  (fn [& parts] parts)
    :for-modifier (fn [s] (keyword s))
 
-   :do-expr    (fn [& body] (apply list 'do body))
+   :do-expr    (fn [body] (apply list 'do body))
 
-   :try-expr   (fn [& parts]
-                 (apply list 'try parts))
-   :catch-clause   (fn [exc-type binding & body]
+   :try-expr   (fn [body & clauses]
+                 (apply list 'try (concat body clauses)))
+   :catch-clause   (fn [exc-type binding body]
                      (apply list 'catch exc-type binding body))
-   :finally-clause (fn [& body]
+   :finally-clause (fn [body]
                      (apply list 'finally body))
 
    ;; Bindings

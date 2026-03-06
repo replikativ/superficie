@@ -1,0 +1,144 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Superficie",
+  "scopeName": "source.superficie",
+  "fileTypes": ["sup"],
+  "patterns": [
+    {"include": "#comment"},
+    {"include": "#string"},
+    {"include": "#regex"},
+    {"include": "#char-literal"},
+    {"include": "#sexp"},
+    {"include": "#keyword"},
+    {"include": "#number"},
+    {"include": "#boolean"},
+    {"include": "#nil"},
+    {"include": "#block-keyword"},
+    {"include": "#def-keyword"},
+    {"include": "#operator-keyword"},
+    {"include": "#special-form"},
+    {"include": "#operator"},
+    {"include": "#metadata"},
+    {"include": "#symbol"}
+  ],
+  "repository": {
+    "comment": {
+      "match": ";.*$",
+      "name": "comment.line.semicolon.superficie"
+    },
+    "string": {
+      "begin": "\"",
+      "end": "\"",
+      "name": "string.quoted.double.superficie",
+      "patterns": [
+        {
+          "match": "\\\\.",
+          "name": "constant.character.escape.superficie"
+        }
+      ]
+    },
+    "regex": {
+      "begin": "#\"",
+      "end": "\"",
+      "name": "string.regexp.superficie",
+      "patterns": [
+        {
+          "match": "\\\\.",
+          "name": "constant.character.escape.superficie"
+        }
+      ]
+    },
+    "char-literal": {
+      "match": "\\\\(newline|space|tab|backspace|formfeed|return|u[0-9a-fA-F]{4}|.)",
+      "name": "constant.character.superficie"
+    },
+    "sexp": {
+      "begin": "\\(",
+      "end": "\\)",
+      "name": "meta.sexp.superficie",
+      "patterns": [
+        {"include": "#comment"},
+        {"include": "#string"},
+        {"include": "#regex"},
+        {"include": "#sexp"},
+        {"include": "#keyword"},
+        {"include": "#number"},
+        {"include": "#boolean"},
+        {"include": "#nil"},
+        {"include": "#symbol"}
+      ]
+    },
+    "keyword": {
+      "match": ":[:a-zA-Z_*+!?<>=\\-][a-zA-Z0-9_.*/+!?<>=\\-]*",
+      "name": "constant.other.keyword.superficie"
+    },
+    "number": {
+      "match": "(?<![a-zA-Z_])(-?[0-9]+\\.?[0-9]*(E-?[0-9]+)?[MN]?|0[xX][0-9a-fA-F]+|-?[0-9]+/[0-9]+)(?![a-zA-Z_])",
+      "name": "constant.numeric.superficie"
+    },
+    "boolean": {
+      "match": "\\b(true|false)\\b",
+      "name": "constant.language.boolean.superficie"
+    },
+    "nil": {
+      "match": "\\bnil\\b",
+      "name": "constant.language.nil.superficie"
+    },
+    "block-keyword": {
+      "match": "\\b(if-let|if-some|if-not|if|when-not|when-let|when-some|when-first|when|let|binding|with-open|with-redefs|loop|cond|condp|case|do|try|catch|finally|for|doseq|dotimes|while|end|else|fn)\\b",
+      "name": "keyword.control.superficie"
+    },
+    "def-keyword": {
+      "match": "\\b(e/defn|defn-|defn|defmacro|defonce|def|ns)\\b",
+      "name": "keyword.other.definition.superficie"
+    },
+    "operator-keyword": {
+      "match": "\\b(and|or|not|mod|rem|in|new|throw|recur)\\b",
+      "name": "keyword.operator.superficie"
+    },
+    "special-form": {
+      "match": "(\\|>|\\.>|:=|=>)",
+      "name": "keyword.operator.special.superficie"
+    },
+    "operator": {
+      "match": "(not=|<=|>=|==|[+\\-*/<>=])",
+      "name": "keyword.operator.arithmetic.superficie"
+    },
+    "metadata": {
+      "match": "\\^",
+      "name": "keyword.operator.metadata.superficie"
+    },
+    "symbol": {
+      "patterns": [
+        {
+          "match": "`[^`]+`",
+          "name": "variable.other.escaped.superficie"
+        },
+        {
+          "match": "@[a-zA-Z_*!?][a-zA-Z0-9_*+!?/$#><=%&'\\-]*",
+          "name": "variable.other.deref.superficie"
+        },
+        {
+          "match": "#'[a-zA-Z_*!?][a-zA-Z0-9_*+!?/$#><=%&'.\\-]*",
+          "name": "variable.other.var-quote.superficie"
+        },
+        {
+          "match": "'",
+          "name": "keyword.operator.quote.superficie"
+        },
+        {
+          "match": "[a-zA-Z_][a-zA-Z0-9_$\\-]*(\\.[a-zA-Z_][a-zA-Z0-9_$\\-]*)*/[a-zA-Z_*+!?/<>=\\-][a-zA-Z0-9_*+!?/$#><=%&'\\-]*",
+          "name": "entity.name.function.qualified.superficie"
+        },
+        {
+          "match": "[a-zA-Z_][a-zA-Z0-9_$\\-]*/[a-zA-Z_*+!?/<>=\\-][a-zA-Z0-9_*+!?/$#><=%&'\\-]*",
+          "name": "entity.name.function.namespaced.superficie"
+        },
+        {
+          "match": "[a-zA-Z_*!?][a-zA-Z0-9_*+!?/$#><=%&'\\-]*",
+          "name": "variable.other.superficie"
+        }
+      ]
+    }
+  }
+}

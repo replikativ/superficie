@@ -220,3 +220,30 @@
   (testing "destructuring in defn"
     (is (= '(defn f [{:keys [x y]}] (+ x y))
            (roundtrip '(defn f [{:keys [x y]}] (+ x y)))))))
+
+;; let-flattening roundtrip tests
+(deftest test-roundtrip-let-flattening
+  (testing "simple tail let"
+    (is (= '(defn foo [x] (let [y (+ x 1)] (* y 2)))
+           (roundtrip '(defn foo [x] (let [y (+ x 1)] (* y 2)))))))
+  (testing "multi-binding tail let"
+    (is (= '(defn foo [x] (let [y 1 z 2] (+ y z)))
+           (roundtrip '(defn foo [x] (let [y 1 z 2] (+ y z)))))))
+  (testing "nested tail lets normalize to merged"
+    (is (= '(defn foo [x] (let [a 1 b 2] (+ a b)))
+           (roundtrip '(defn foo [x] (let [a 1] (let [b 2] (+ a b))))))))
+  (testing "non-tail let preserved"
+    (is (= '(defn foo [x] (let [y 1] (use y)) (other))
+           (roundtrip '(defn foo [x] (let [y 1] (use y)) (other))))))
+  (testing "let in if branches (flattened)"
+    (is (= '(if true (let [x 1] x) (let [y 2] y))
+           (roundtrip '(if true (let [x 1] x) (let [y 2] y))))))
+  (testing "let in when body"
+    (is (= '(when true (let [x 1] (println x) x))
+           (roundtrip '(when true (let [x 1] (println x) x))))))
+  (testing "let in do body"
+    (is (= '(do (let [x 1] (println x)))
+           (roundtrip '(do (let [x 1] (println x)))))))
+  (testing "let-statement parse only (no render involved)"
+    (is (= '(defn foo [x] (let [y 1] (+ x y)))
+           (parse/parse-string "defn foo(x):\n  let y := 1\n  x + y\nend")))))

@@ -1,0 +1,28 @@
+{
+  "name": "superficie",
+  "displayName": "Superficie",
+  "description": "Syntax highlighting for Superficie (.sup) — surface syntax for Clojure",
+  "version": "0.1.0",
+  "publisher": "replikativ",
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": ["Programming Languages"],
+  "contributes": {
+    "languages": [
+      {
+        "id": "superficie",
+        "aliases": ["Superficie", "sup"],
+        "extensions": [".sup"],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "superficie",
+        "scopeName": "source.superficie",
+        "path": "./superficie.tmLanguage.json"
+      }
+    ]
+  }
+}

@@ -132,7 +132,7 @@ end`
 end`
   },
   {
-    title: "Let bindings and if/else",
+    title: "Let flattening and if/else",
     clojure: `(defn safe-divide [a b]
   (if (zero? b)
     {:error "Division by zero"}
@@ -143,9 +143,9 @@ end`
   if zero?(b):
     {:error "Division by zero"}
   else:
-    let result := a / b, rounded := Math/round(result):
-      {:value result, :rounded rounded}
-    end
+    let result := a / b
+    let rounded := Math/round(result)
+    {:value result, :rounded rounded}
   end
 end`
   },
@@ -232,10 +232,10 @@ end`
     (println (quote swapped) old '-> new)
     #'swap-and-log))`,
     superficie: `defn swap-and-log(state, f):
-  let old := @state, new := swap!(state, f):
-    println('swapped, old, '->, new)
-    #'swap-and-log
-  end
+  let old := @state
+  let new := swap!(state, f)
+  println('swapped, old, '->, new)
+  #'swap-and-log
 end`
   },
   {

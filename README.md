@@ -87,7 +87,7 @@ end
 </tr>
 </table>
 
-See [`examples/side-by-side.html`](examples/side-by-side.html) for a full interactive comparison with syntax highlighting.
+See [`examples/side-by-side.html`](https://replikativ.github.io/superficie/examples/side-by-side.html) for a full interactive comparison with syntax highlighting.
 
 ## What It Is (and Isn't)
 
@@ -105,7 +105,7 @@ Every Clojure form has a superficie rendering:
 - `(+ a (* b c))` becomes `a + b * c` — infix with standard precedence
 - `(->> x (map f) (filter g))` becomes `x |> map(f) |> filter(g)` — pipes
 - `(if test body else)` becomes `if test: body else: ... end` — blocks
-- `(let [x 1] ...)` becomes `let x := 1: ... end` — bindings
+- `(let [x 1] ...)` becomes `let x := 1` — bindings (flattened into enclosing block)
 
 Forms that can't be expressed in surface syntax (syntax-quoted macro bodies, uncommon reader macros) fall through to **S-expression passthrough** — raw Clojure in parentheses is always valid superficie. This means the renderer never fails: it just falls back gracefully.
 
@@ -170,7 +170,10 @@ end
 ### Bindings and Loops
 
 ```
-let x := 1, y := 2:
+;; let flattens into the enclosing block — no extra end needed
+defn example():
+  let x := 1
+  let y := 2
   x + y
 end
 
@@ -182,12 +185,11 @@ loop lo := 0, hi := n:
   if hi - lo <= 1:
     lo
   else:
-    let mid := (lo + hi) / 2:
-      if aget(arr, mid) <= target:
-        recur(mid, hi)
-      else:
-        recur(lo, mid)
-      end
+    let mid := (lo + hi) / 2
+    if aget(arr, mid) <= target:
+      recur(mid, hi)
+    else:
+      recur(lo, mid)
     end
   end
 end
@@ -264,6 +266,18 @@ clj -M -m superficie.main parse core.sup
 ```
 
 ### Syntax Highlighting
+
+#### VS Code / TextMate
+
+A TextMate grammar is provided in [`editors/vscode/`](editors/vscode/). To install locally:
+
+```bash
+ln -s /path/to/superficie/editors/vscode ~/.vscode/extensions/superficie
+```
+
+This provides syntax highlighting, bracket matching, and code folding for `.sup` files.
+
+#### highlight.js (web)
 
 A highlight.js language plugin is provided at [`dist/superficie.hljs.js`](dist/superficie.hljs.js):
 

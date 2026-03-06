@@ -57,7 +57,9 @@ amp-param = <'&'> <_>? (symbol | vector-literal | map-literal)
 (* === Body: one or more expressions separated by newlines === *)
 (* Within a body, each line is one expression. Multi-line expressions *)
 (* work via pipe operators (|> / .>) which consume the leading newline. *)
-<body> = (<eol> expr)+
+body = (<eol> body-elem)+
+<body-elem> = let-statement | expr
+let-statement = <'let'> <_> binding
 (* At least one newline, with optional surrounding spaces/tabs *)
 <eol> = #'[ \t]*\n[ \t]*(\n[ \t]*)*'
       | <sp>? #';[^\n]*' #'[ \t]*\n[ \t]*(\n[ \t]*)*'
