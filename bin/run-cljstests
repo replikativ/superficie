@@ -7,3 +7,11 @@ echo "Running ClojureScript node tests"
 rm out/node-tests.js 2>/dev/null || true
 npx shadow-cljs release node-tests
 node out/node-tests.js
+
+echo
+echo
+
+echo "Running CI build tests"
+rm out/ci-tests.js 2>/dev/null || true
+npx shadow-cljs release ci
+node out/ci-tests.js
