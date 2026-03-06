@@ -249,6 +249,34 @@ end`
 end`
   },
   {
+    title: "Hiccup UI component",
+    clojure: `(defn user-table [users]
+  [:table.data-table
+   [:thead
+    [:tr
+     [:th "Name"]
+     [:th "Email"]
+     [:th "Role"]]]
+   [:tbody
+    (for [{:keys [name email role]} users]
+      [:tr
+       [:td name]
+       [:td [:a {:href (str "mailto:" email)} email]]
+       [:td role]])]])`,
+    superficie: `defn user-table(users):
+  [:table.data-table,
+   [:thead,
+    [:tr, [:th, "Name"], [:th, "Email"], [:th, "Role"]]],
+   [:tbody,
+    for {:keys [name, email, role]} in users:
+      [:tr,
+       [:td, name],
+       [:td, [:a, {:href str("mailto:", email)}, email]],
+       [:td, role]]
+    end]]
+end`
+  },
+  {
     title: "Comment form (sexp passthrough)",
     clojure: `(comment
   (greet "world")
