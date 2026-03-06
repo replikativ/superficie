@@ -306,4 +306,4 @@ Superficie roundtrips 523/533 files (98%) across 17 real-world Clojure projects 
 
 Copyright 2026 Christian Weilbach.
 
-Eclipse Public License 2.0.
+Apache Licence 2.0.
