@@ -46,7 +46,7 @@ def-kw = 'def' | 'defonce'
 
 defn-form = defn-kw <_> meta-symbol <_>? params <_>? <':'> body <_> <'end'>
           | defn-kw <_> meta-symbol <_> multi-arity+ <_>? <'end'>
-defn-kw = 'defn' | 'defn-' | 'defmacro'
+defn-kw = 'e/defn' | 'defn' | 'defn-' | 'defmacro'
 
 multi-arity = <_>? params <_>? <':'> body
 
@@ -244,7 +244,7 @@ operator-symbol = #'[<>]!{1,2}'
                 | #'[+\-*/><][+\-*/><]+'
 
 (* Reserved words — negative lookahead prevents matching prefixes *)
-reserved = ('defn-' | 'defn' | 'fn-' | 'fn'
+reserved = ('e/defn' | 'defn-' | 'defn' | 'fn-' | 'fn'
            | 'defmacro' | 'defonce' | 'def'
            | 'if-let' | 'if-some' | 'if-not' | 'if'
            | 'when-not' | 'when-let' | 'when-some' | 'when-first' | 'when'

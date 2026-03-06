@@ -205,7 +205,7 @@
    :def-form   (fn [kw sym val] (list (symbol kw) sym val))
    :def-kw     identity
    :defn-form  (fn [kw sym & rest]
-                 (let [form-sym (case kw "defn" 'defn "defn-" 'defn- "defmacro" 'defmacro)]
+                 (let [form-sym (case kw "defn" 'defn "defn-" 'defn- "defmacro" 'defmacro "e/defn" 'e/defn)]
                    (apply list form-sym sym rest)))
    :defn-kw    identity
 

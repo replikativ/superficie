@@ -176,12 +176,12 @@
                   (contains? #{'deref} core-name) :deref-form
                   (= 'ns core-name) :ns-form
                   :else nil)))
-            ;; Operator fallback: if the unqualified name is an arithmetic/logical op,
-            ;; treat it as such regardless of namespace (handles re-referred ops like
-            ;; (refer romeo.numeric :only [+ - * /]) that exclude clojure.core)
+            ;; Name-based fallback: if the unqualified name matches a known form,
+            ;; treat it accordingly regardless of namespace
             (let [unqual (symbol (name qualified))]
               (cond
                 (contains? arithmetic-ops unqual) :infix-op
                 (contains? logical-ops unqual)    :logical-op
+                (contains? #{'defn 'defn- 'defmacro} unqual) :defn-form
                 :else nil)))))))
 
