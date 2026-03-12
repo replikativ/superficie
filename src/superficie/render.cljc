@@ -4,9 +4,9 @@
   (:require [rewrite-clj.zip :as z]
             [rewrite-clj.node :as node]
             [clojure.string :as str]
+            [superficie.opaque :as opaque]
             [superficie.resolve :as resolve]
-            [superficie.parse :as parse]
-            [instaparse.core :as instaparse]))
+            [superficie.parse :as parse]))
 
 (defn- regex? [x]
   #?(:clj (instance? java.util.regex.Pattern x)
@@ -384,7 +384,7 @@
 
 (defn- render-ns-form
   "Render ns form. Keep it mostly literal but with cleaner formatting."
-  [ctx [_ ns-name & clauses]]
+  [_ctx [_ ns-name & clauses]]
   (str "ns " ns-name "\n"
        (->> clauses
             (map #(str "  " (pr-str %)))
@@ -484,6 +484,8 @@
   [ctx form]
   (try
     (cond
+      (opaque/opaque-form? form) (opaque/opaque-raw form)
+
     ;; Nil, booleans, numbers, strings, keywords, regexes
       (nil? form) "nil"
       (boolean? form) (str form)
@@ -654,23 +656,6 @@
         target (second children)]
     (str "^" (node/string meta-val) " " (render-top-node ctx target))))
 
-(defn- contains-syntax-quote?
-  "Check if a node tree contains syntax-quote or unquote nodes.
-   Does not recurse into quote nodes (those are data)."
-  [n]
-  (let [tag (node/tag n)]
-    (or (#{:syntax-quote :unquote :unquote-splicing} tag)
-        (when (and (node/inner? n) (not= tag :quote))
-          (some contains-syntax-quote? (node/children n))))))
-
-(defn- contains-reader-conditional?
-  "Check if a node tree contains reader conditional (#? or #?@) nodes."
-  [n]
-  (let [tag (node/tag n)]
-    (or (= :reader-macro tag)
-        (when (node/inner? n)
-          (some contains-reader-conditional? (node/children n))))))
-
 (defn- sexp-passthrough
   "Emit a node as raw Clojure sexp, collapsing blank lines to avoid
    the surface syntax grammar treating them as top-level separators."
@@ -691,21 +676,21 @@
     :uneval nil
     ;; Reader macros (#?, #?@, tagged literals): preserve literally
     :reader-macro (node/string n)
-    ;; Regular forms — check for syntax-quote/unquote or reader conditionals
-    ;; before transforming, as node/sexpr mangles these
-    (if (or (contains-syntax-quote? n)
-            (contains-reader-conditional? n))
-      (sexp-passthrough n)
-      (let [fallback (sexp-passthrough n)]
-        (try
-          (let [rendered (render-form ctx (node/sexpr n))]
-            ;; Validate roundtrip: if the rendered form doesn't parse back,
-            ;; fall back to sexp passthrough for correctness
-            (if (instaparse/failure? (parse/parse-raw rendered))
-              fallback
-              rendered))
-          (catch #?(:clj Exception :cljs :default) _
-            fallback))))))
+    ;; Regular forms — preserve opaque descendants exactly while still
+    ;; rendering the surrounding structure in superficie syntax.
+    (let [fallback (sexp-passthrough n)
+          {:keys [source mapping]} (opaque/preprocess-source fallback {:include-comment? true
+                                                                       :include-uneval? true})]
+      (try
+        (let [sexpr (node/sexpr (z/node (z/of-string source {:track-position? true})))
+              restored (opaque/restore-opaque-forms sexpr mapping)
+              rendered (render-form ctx restored)]
+          ;; Validate roundtrip: if the rendered form doesn't parse back,
+          ;; fall back to sexp passthrough for correctness.
+          (parse/parse-string rendered)
+          rendered)
+        (catch #?(:clj Exception :cljs :default) _
+          fallback)))))
 
 ;; --- Top-level API ---
 

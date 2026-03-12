@@ -146,7 +146,7 @@ if-bind-kw = 'if-let' | 'if-some'
 
 when-expr = when-kw <_> expr <_>? <':'> body <_> <'end'>
           | when-bind-kw <_> bindings <_>? <':'> body <_> <'end'>
-when-kw = 'when' | 'when-not'
+when-kw = 'when' | 'when-not' | 'while'
 when-bind-kw = 'when-let' | 'when-some' | 'when-first'
 
 let-expr = let-kw <_> bindings <_>? <':'> body <_> <'end'>

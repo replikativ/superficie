@@ -215,7 +215,7 @@ transform-values({:a 1, :b 2, :c 3},
                  fn(x): x * x end)`
   },
   {
-    title: "Macros",
+    title: "Macros with syntax-quote",
     clojure: `(defmacro unless [pred & body]
   \`(if (not ~pred)
      (do ~@body)))`,
@@ -277,41 +277,52 @@ end`
 end`
   },
   {
-    title: "Comment form (sexp passthrough)",
-    clojure: `(comment
-  (greet "world")
-  (+ 1 2 3)
-  (println "scratch pad"))`,
-    superficie: `(comment
-  (greet "world")
-  (+ 1 2 3)
-  (println "scratch pad"))`
+    title: "Tagged literal inside ordinary data",
+    clojure: `(def release
+  {:version "0.2.0"
+   :published-at #inst "2026-03-11"
+   :channel :preview})`,
+    superficie: `def release := {:version "0.2.0",
+                :published-at #inst "2026-03-11",
+                :channel :preview}`
   },
   {
-    title: ".cljc reader conditionals",
+    title: "Reader conditional as exact raw island",
     clojure: `(defn parse-int [s]
   #?(:clj (Integer/parseInt s)
      :cljs (js/parseInt s 10)))
-
-(defn upper [s]
-  (str/upper-case s))
 
 (defn process [data]
   (->> data
        (filter :active)
        (map :name)))`,
-    superficie: `(defn parse-int [s]
+    superficie: `defn parse-int(s):
   #?(:clj (Integer/parseInt s)
-     :cljs (js/parseInt s 10)))
-
-defn upper(s):
-  str/upper-case(s)
+     :cljs (js/parseInt s 10))
 end
 
 defn process(data):
   data
     |> filter(:active)
     |> map(:name)
+end`
+  },
+  {
+    title: "Inline comment form in rendered code",
+    clojure: `(defn inspect-user [user]
+  (comment user)
+  (:name user))`,
+    superficie: `defn inspect-user(user):
+  (comment user)
+  :name(user)
+end`
+  },
+  {
+    title: "Syntax-quote preserved literally",
+    clojure: `(defmacro emit-pair [a b]
+  \`[~a ~b ~@[]])`,
+    superficie: `defmacro emit-pair(a, b):
+  \`[~a ~b ~@[]]
 end`
   }
 ];

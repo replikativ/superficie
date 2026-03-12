@@ -3,8 +3,7 @@
   (:require [superficie.render :as render]
             [superficie.parse :as parse]
             [superficie.runtime :as rt]
-            [clojure.tools.cli :as cli]
-            [clojure.string :as str])
+            [clojure.tools.cli :as cli])
   (:gen-class))
 
 (def cli-options
@@ -31,12 +30,7 @@
 (defn- parse-source
   "Parse superficie source to Clojure S-expressions."
   [source]
-  (let [result (parse/parse-string source)]
-    (if (vector? result)
-      ;; Multiple top-level forms
-      (str/join "\n\n" (map pr-str result))
-      ;; Single form
-      (pr-str result))))
+  (parse/emit-source (parse/parse-string source)))
 
 (defn -main [& args]
   (let [{:keys [options arguments summary errors]} (cli/parse-opts args cli-options)]

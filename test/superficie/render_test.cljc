@@ -1,8 +1,7 @@
 (ns superficie.render-test
   (:require [clojure.test :refer [deftest is testing]]
             [clojure.string :as str]
-            [superficie.render :as render]
-            [superficie.resolve :as resolve]))
+            [superficie.render :as render]))
 
 (deftest test-atoms
   (let [ctx {:refers {} :aliases {} :excludes #{}}]
@@ -124,15 +123,27 @@
   (testing "top-level #? preserved verbatim"
     (is (= "#?(:clj (def x 1) :cljs (def x 2))"
            (render/render-string "#?(:clj (def x 1) :cljs (def x 2))"))))
-  (testing "form containing #? falls back to sexp passthrough"
+  (testing "form containing #? renders as superficie with exact raw island"
     (let [result (render/render-string "(defn foo [s]\n  #?(:clj (Integer/parseInt s)\n     :cljs (js/parseInt s 10)))")]
+      (is (str/includes? result "defn foo(s):"))
       (is (str/includes? result "#?(:clj"))
       (is (str/includes? result ":cljs"))
-      (is (not (str/includes? result "read-string")))))
+      (is (not (str/includes? result "read-string")))
+      (is (not (str/starts-with? result "(defn foo")))))
   (testing "pure forms alongside #? still render as superficie"
     (let [result (render/render-string "(defn pure [x] (inc x))\n\n(defn mixed [s]\n  #?(:clj (.toUpperCase s)\n     :cljs (.toUpperCase s)))")]
       (is (str/includes? result "defn pure(x):"))
-      (is (str/includes? result "#?(:clj")))))
+      (is (str/includes? result "defn mixed(s):"))
+      (is (str/includes? result "#?(:clj"))))
+  (testing "tagged literals stay literal inside ordinary rendered forms"
+    (let [result (render/render-string "(def data {:created-at #inst \"2020-01-01\"})")]
+      (is (str/includes? result "def data :="))
+      (is (str/includes? result "#inst \"2020-01-01\""))))
+  (testing "comment forms stay literal without collapsing the parent form"
+    (let [result (render/render-string "(defn f [x] (comment x) x)")]
+      (is (str/includes? result "defn f(x):"))
+      (is (str/includes? result "(comment x)"))
+      (is (not (str/starts-with? result "(defn f"))))))
 
 ;; let-flattening: tail lets rendered as statements, not blocks
 (deftest test-let-flattening

@@ -1,10 +1,12 @@
 (ns superficie.parse
   "Parses .sup surface syntax into Clojure S-expressions.
    This is the .sup -> Clojure direction."
-  (:require [instaparse.core :as insta #?(:cljs :refer-macros :clj :refer) [defparser]]
+  (:require [instaparse.core :as insta]
             #?(:clj [clojure.java.io :as io])
             #?(:cljs [cljs.reader :as cljs-reader])
-            [clojure.string :as str]))
+            [clojure.string :as str]
+            [superficie.opaque :as opaque])
+  #?(:cljs (:require-macros [instaparse.core :refer [defparser]])))
 
 #?(:clj (def parser (insta/parser (io/resource "superficie.ebnf")))
    :cljs (defparser parser "resources/superficie.ebnf"))
@@ -19,6 +21,8 @@
   "Parse a .sup string into a raw parse tree."
   [input]
   (parser input))
+
+(declare emit-form)
 
 ;; === S-expression reconstruction ===
 
@@ -363,15 +367,83 @@
 (defn parse-string
   "Parse a .sup string and return Clojure S-expressions."
   [input]
-  (let [clean (strip-leading-comments input)
+  (let [{:keys [source mapping]} (opaque/preprocess-source input {:include-comment? true
+                                                                  :include-uneval? true})
+        clean (strip-leading-comments source)
         tree (parse-raw clean)]
     (if (insta/failure? tree)
       (throw (ex-info "Parse error" {:failure (insta/get-failure tree)
                                      :input clean}))
       (let [result (insta/transform xform tree)]
-        (if (and (vector? result) (= 1 (count result)))
-          (first result)
-          result)))))
+        (-> (if (and (vector? result) (= 1 (count result)))
+              (first result)
+              result)
+            (opaque/restore-opaque-forms mapping))))))
+
+(defn- strip-meta
+  [form]
+  (if (and #?(:clj (instance? clojure.lang.IObj form)
+              :cljs (satisfies? IWithMeta form))
+           (meta form))
+    (let [clean-meta (->> (meta form)
+                          (remove (fn [[key _]]
+                                    (= "instaparse.gll" (namespace key))))
+                          (into {}))]
+      (with-meta form (when (seq clean-meta) clean-meta)))
+    form))
+
+(defn- emit-meta-prefix
+  [form]
+  (when-let [metadata (seq (meta (strip-meta form)))]
+    (str "^" (pr-str (into {} metadata)) " ")))
+
+(defn emit-form
+  "Emit parsed forms back to Clojure source, preserving opaque raw islands."
+  [form]
+  (cond
+    (opaque/opaque-form? form) (opaque/opaque-raw form)
+    (nil? form) "nil"
+    (boolean? form) (str form)
+    (number? form) (str form)
+    (string? form) (pr-str form)
+    (keyword? form) (str form)
+    (char? form) (pr-str form)
+    #?(:clj (instance? java.util.regex.Pattern form)
+       :cljs (regexp? form))
+    (str "#\"" form "\"")
+    (symbol? form)
+    (str (emit-meta-prefix form) (str (strip-meta form)))
+    (vector? form)
+    (str (emit-meta-prefix form)
+         "["
+         (str/join " " (map emit-form (strip-meta form)))
+         "]")
+    (map? form)
+    (str (emit-meta-prefix form)
+         "{"
+         (->> (strip-meta form)
+              (map (fn [[key value]]
+                     (str (emit-form key) " " (emit-form value))))
+              (str/join ", "))
+         "}")
+    (set? form)
+    (str (emit-meta-prefix form)
+         "#{"
+         (str/join " " (map emit-form (strip-meta form)))
+         "}")
+    (sequential? form)
+    (str (emit-meta-prefix form)
+         "("
+         (str/join " " (map emit-form (strip-meta form)))
+         ")")
+    :else (pr-str form)))
+
+(defn emit-source
+  "Emit one or more parsed forms back to Clojure source text."
+  [parsed]
+  (if (vector? parsed)
+    (str/join "\n\n" (map emit-form parsed))
+    (emit-form parsed)))
 
 #?(:clj
    (defn parse-file

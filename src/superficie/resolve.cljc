@@ -159,7 +159,7 @@
                   (contains? threading-ops core-name)   :threading
                   (contains? #{'if 'if-not} core-name)  :if-form
                   (contains? #{'if-let 'if-some} core-name) :if-bind-form
-                  (contains? #{'when 'when-not} core-name)  :when-form
+                  (contains? #{'when 'when-not 'while} core-name)  :when-form
                   (contains? #{'when-let 'when-some 'when-first} core-name) :when-bind-form
                   (contains? #{'let 'binding 'with-open 'with-redefs} core-name) :let-form
                   (contains? #{'cond} core-name) :cond-form

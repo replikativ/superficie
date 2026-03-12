@@ -1,7 +1,7 @@
 (ns superficie.parse-test
   (:require [clojure.test :refer [deftest is testing]]
             [superficie.parse :as parse]
-            [instaparse.core :as insta]))
+            [superficie.opaque :as opaque]))
 
 (deftest test-atoms
   (testing "numbers"
@@ -215,3 +215,29 @@
     (is (= '>! (parse/parse-string ">!")))
     (is (= '<!! (parse/parse-string "<!!")))
     (is (= '>!! (parse/parse-string ">!!")))))
+
+(deftest test-opaque-forms
+  (testing "top-level opaque reader forms parse as preserved islands"
+    (let [conditional (parse/parse-string "#?(:clj 1 :cljs 2)")
+          tagged (parse/parse-string "#inst \"2020-01-01\"")
+          syntax-quoted (parse/parse-string "`(foo ~bar ~@baz)")]
+      (is (opaque/opaque-form? conditional))
+      (is (= "#?(:clj 1 :cljs 2)" (parse/emit-form conditional)))
+      (is (opaque/opaque-form? tagged))
+      (is (= "#inst \"2020-01-01\"" (parse/emit-form tagged)))
+      (is (opaque/opaque-form? syntax-quoted))
+      (is (= "`(foo ~bar ~@baz)" (parse/emit-form syntax-quoted)))))
+  (testing "opaque forms can live inside ordinary surface blocks"
+    (is (= "(defn f [x] #?(:clj x :cljs x))"
+           (parse/emit-source
+            (parse/parse-string
+             "defn f(x):\n  #?(:clj x :cljs x)\nend"))))
+    (is (= "(def x #inst \"2020-01-01\")"
+           (parse/emit-source
+            (parse/parse-string
+             "def x := #inst \"2020-01-01\"")))))
+  (testing "comment forms can be preserved as raw islands in bodies"
+    (is (= "(defn f [x] (comment x) x)"
+           (parse/emit-source
+            (parse/parse-string
+             "defn f(x):\n  (comment x)\n  x\nend"))))))
