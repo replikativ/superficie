@@ -44,7 +44,7 @@ body = (eol expr)+
 
 Multi-line expressions work via pipe operators which consume the leading newline:
 
-```
+```clojure
 users
   |> filter(:active)
   |> map(:name)
@@ -88,14 +88,14 @@ defn-kw   = 'defn' | 'defn-' | 'defmacro'
 ```
 
 Single arity:
-```
+```clojure
 defn greet(name):
   str("Hello, ", name)
 end
 ```
 
 Multi arity:
-```
+```clojure
 defn greet
   ():
     greet("World")
@@ -146,7 +146,7 @@ Binding targets can be symbols, vectors (for sequential destructuring), or maps 
 
 Inside `for`/`doseq`/`dotimes`, modifiers follow bindings:
 
-```
+```clojure
 for x in xs, y in ys, when x not= y, let z := x + y:
   [x, y, z]
 end
@@ -163,7 +163,7 @@ callable  = keyword | symbol | set | map | vector | '(' expr ')'
 
 Any callable followed by parenthesized, comma-separated arguments is a function call:
 
-```
+```clojure
 map(inc, [1, 2, 3])        ;; (map inc [1 2 3])
 :name(user)                 ;; (:name user)
 #{:admin}(role)             ;; (#{:admin} role)
@@ -171,7 +171,7 @@ map(inc, [1, 2, 3])        ;; (map inc [1 2 3])
 
 ## Postfix: Java Interop
 
-```
+```clojure
 obj.method(args)   ;; (.method obj args)
 obj.-field         ;; (.-field obj)
 new HashMap(16)    ;; (HashMap. 16)
@@ -188,7 +188,7 @@ pipe-expr = expr ('|>' step)+    ;; thread-last (->>)
 
 Pipe steps can be function calls or `.method()` calls:
 
-```
+```clojure
 data
   |> filter(:active)
   |> map(:name)
@@ -244,7 +244,7 @@ Operator symbols (`+`, `*`, `/`, `->`, `->>`, etc.) can be used as values — e.
 
 The following identifiers are reserved and cannot be used as symbol names without backtick escaping:
 
-```
+```clojure
 defn defn- fn fn- defmacro defonce def
 if if-not if-let if-some
 when when-not when-let when-some when-first

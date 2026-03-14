@@ -31,7 +31,7 @@ Superficie exists to remove that barrier. You write Clojure as normal. When you 
 </td>
 <td>
 
-```
+```clojure
 defn greet(name):
   str("Hello, ", name, "!")
 end
@@ -50,7 +50,7 @@ end
 </td>
 <td>
 
-```
+```clojure
 defn quadratic(a, b, c, x):
   a * x * x + b * x + c
 end
@@ -73,7 +73,7 @@ end
 </td>
 <td>
 
-```
+```clojure
 defn process-users(users):
   users
     |> filter(:active)
@@ -123,7 +123,7 @@ See [`doc/grammar.md`](doc/grammar.md) for the full grammar reference.
 
 ### Definitions and Functions
 
-```
+```clojure
 def pi := 3.14159
 
 defn factorial(n):
@@ -147,7 +147,7 @@ end
 
 ### Control Flow
 
-```
+```clojure
 if x > 0:
   :positive
 else:
@@ -169,7 +169,7 @@ end
 
 ### Bindings and Loops
 
-```
+```clojure
 ;; let flattens into the enclosing block — no extra end needed
 defn example():
   let x := 1
@@ -197,7 +197,7 @@ end
 
 ### Threading (Pipes)
 
-```
+```clojure
 ;; ->> becomes |>
 users
   |> filter(:active)
@@ -212,7 +212,7 @@ config
 
 ### Java Interop
 
-```
+```clojure
 obj.method(arg1, arg2)
 obj.-field
 new HashMap(16)
@@ -221,7 +221,7 @@ Integer/parseInt("42")
 
 ### Namespaces and Macros
 
-```
+```clojure
 ns myapp.core
   (:require [clojure.string :as str]
             [myapp.db :refer [query insert!]])
