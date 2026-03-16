@@ -8,4 +8,19 @@
   :ci
   {:target    :node-test
    :output-to "out/ci-tests.js"
-   :compiler-options {:infer-externs true}}}}
+   :compiler-options {:infer-externs true}}
+
+  :npm
+  {:target    :node-library
+   :output-to "dist/superficie.js"
+   :exports   {:renderString  superficie.api/renderString
+               :parseString   superficie.api/parseString}
+   :compiler-options {:infer-externs true
+                      :optimizations :advanced}}
+
+  :browser
+  {:target    :browser
+   :output-dir "dist/browser"
+   :modules   {:superficie {:entries [superficie.browser]}}
+   :compiler-options {:infer-externs true
+                      :optimizations :advanced}}}}

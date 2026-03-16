@@ -1,9 +1,28 @@
 {
   "name": "superficie",
-  "version": "1.0.0",
-  "description": "ClojureScript test runner",
+  "version": "0.1.0",
+  "description": "Surface syntax for Clojure — bidirectional renderer between S-expressions and readable syntax",
+  "main": "dist/superficie.js",
+  "files": [
+    "dist/superficie.js",
+    "dist/superficie.hljs.js",
+    "dist/browser/superficie.js"
+  ],
+  "keywords": [
+    "clojure",
+    "syntax",
+    "s-expressions",
+    "renderer",
+    "parser",
+    "superficie"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/replikativ/superficie"
+  },
+  "author": "Christian Weilbach",
+  "license": "Apache-2.0",
   "devDependencies": {
     "shadow-cljs": "^2.26.0"
-  },
-  "license": "Apache-2.0"
+  }
 }

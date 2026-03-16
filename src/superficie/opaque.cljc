@@ -165,9 +165,10 @@
       :else (consume-atom-end source start))))
 
 (defn- detect-opaque-kind
-  [source index {:keys [include-comment? include-uneval?]
+  [source index {:keys [include-comment? include-uneval? include-quote-collection?]
                  :or {include-comment? false
-                      include-uneval? false}}]
+                      include-uneval? false
+                      include-quote-collection? false}}]
   (let [fragment (subs source index)
         ch (char-at source index)]
     (cond
@@ -176,6 +177,11 @@
       (and include-uneval? (str/starts-with? fragment "#_")) :uneval
       (and include-comment? (comment-form-start? source index)) :comment
       (tagged-literal-start? source index) :tagged-literal
+      ;; Quoted collections: preserve original formatting of data literals
+      (and include-quote-collection?
+           (= ch \')
+           (let [next-ch (char-at source (inc index))]
+             (contains? #{\( \[ \{} next-ch))) :quote-collection
       (= ch \`) :syntax-quote
       (str/starts-with? fragment "~@") :unquote-splicing
       (= ch \~) :unquote
@@ -187,6 +193,7 @@
                     :reader-conditional (consume-prefixed-form-end source index 2)
                     :reader-conditional-splicing (consume-prefixed-form-end source index 3)
                     :tagged-literal (consume-tagged-literal-end source index)
+                    :quote-collection (consume-prefixed-form-end source index 1)
                     :syntax-quote (consume-prefixed-form-end source index 1)
                     :unquote (consume-prefixed-form-end source index 1)
                     :unquote-splicing (consume-prefixed-form-end source index 2)

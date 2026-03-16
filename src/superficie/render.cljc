@@ -466,14 +466,19 @@
     (nil? form) "nil"
     (boolean? form) (str form)
     (number? form) (str form)
-    (string? form) (pr-str form)
+    (string? form) (if (str/includes? form "\n")
+                     (str "\"" (-> form
+                                   (str/replace "\\" "\\\\")
+                                   (str/replace "\"" "\\\"")
+                                   (str/replace "\t" "\\t")) "\"")
+                     (pr-str form))
     (keyword? form) (str form)
     (char? form) (pr-str form)
     (regex? form) (str "#\"" form "\"")
     (symbol? form) (escape-symbol form)
-    (vector? form) (str "[" (str/join ", " (map render-data form)) "]")
-    (map? form) (str "{" (str/join ", " (map (fn [[k v]] (str (render-data k) " " (render-data v))) form)) "}")
-    (set? form) (str "#{" (str/join ", " (map render-data form)) "}")
+    (vector? form) (str "[" (str/join " " (map render-data form)) "]")
+    (map? form) (str "{" (str/join " " (map (fn [[k v]] (str (render-data k) " " (render-data v))) form)) "}")
+    (set? form) (str "#{" (str/join " " (map render-data form)) "}")
     (seq? form) (str "(" (str/join " " (map render-data form)) ")")
     :else (str form)))
 
@@ -490,7 +495,13 @@
       (nil? form) "nil"
       (boolean? form) (str form)
       (number? form) (str form)
-      (string? form) (pr-str form)
+      (string? form) (if (str/includes? form "\n")
+                       ;; Preserve actual newlines for readability; escape other specials
+                       (str "\"" (-> form
+                                     (str/replace "\\" "\\\\")
+                                     (str/replace "\"" "\\\"")
+                                     (str/replace "\t" "\\t")) "\"")
+                       (pr-str form))
       (keyword? form) (str form)
       (char? form) (pr-str form)
       (regex? form) (str "#\"" form "\"")
@@ -625,12 +636,7 @@
 
                 ;; quote → 'form (render content as data, not code)
                   (= head 'quote)
-                  (let [quoted (first args)]
-                    (if (seq? quoted)
-                    ;; Quoted list → sexp passthrough so we don't mangle data
-                      (str "'(" (str/join " " (map render-data quoted)) ")")
-                    ;; Vectors, maps, sets, symbols → normal rendering
-                      (str "'" (render-form ctx quoted))))
+                  (str "'" (render-data (first args)))
 
                 ;; var → #'sym
                   (= head 'var)
@@ -678,9 +684,15 @@
     :reader-macro (node/string n)
     ;; Regular forms — preserve opaque descendants exactly while still
     ;; rendering the surrounding structure in superficie syntax.
-    (let [fallback (sexp-passthrough n)
-          {:keys [source mapping]} (opaque/preprocess-source fallback {:include-comment? true
-                                                                       :include-uneval? true})]
+    (let [;; Extract opaque forms (including quoted collections) from the
+          ;; original node string to preserve their formatting, then collapse
+          ;; blank lines in the remaining source for the Clojure reader.
+          {:keys [source mapping]} (opaque/preprocess-source (node/string n)
+                                                             {:include-comment? true
+                                                              :include-uneval? true
+                                                              :include-quote-collection? true})
+          source (str/replace source #"\n\n+" "\n")
+          fallback (sexp-passthrough n)]
       (try
         (let [sexpr (node/sexpr (z/node (z/of-string source {:track-position? true})))
               restored (opaque/restore-opaque-forms sexpr mapping)
@@ -691,6 +703,116 @@
           rendered)
         (catch #?(:clj Exception :cljs :default) _
           fallback)))))
+
+;; --- Width-aware formatting ---
+;; Post-processes rendered output to break long lines at comma boundaries.
+
+(def ^:private ^:const default-max-width 80)
+
+(defn- find-break-point
+  "Find the outermost delimiter pair in s, respecting strings.
+   Returns {:prefix, :inner, :suffix} or nil."
+  [s]
+  (let [len (count s)]
+    (loop [i 0, in-str false, escaped false]
+      (when (< i len)
+        (let [c (nth s i)]
+          (cond
+            escaped                     (recur (inc i) in-str false)
+            (and (= c \\) in-str)       (recur (inc i) in-str true)
+            (= c \")                    (recur (inc i) (not in-str) false)
+            in-str                      (recur (inc i) in-str false)
+
+            (or (= c \() (= c \[) (= c \{))
+            (let [open  c
+                  close (case open \( \) \[ \] \{ \})
+                  end   (loop [j (inc i), depth 1, in-s false, esc false]
+                          (when (< j len)
+                            (let [ch (nth s j)]
+                              (cond
+                                esc                    (recur (inc j) depth in-s false)
+                                (and (= ch \\) in-s)  (recur (inc j) depth in-s true)
+                                (= ch \")              (recur (inc j) depth (not in-s) false)
+                                in-s                   (recur (inc j) depth in-s false)
+                                (= ch open)            (recur (inc j) (inc depth) in-s false)
+                                (= ch close)           (if (= depth 1) j
+                                                           (recur (inc j) (dec depth) in-s false))
+                                :else                  (recur (inc j) depth in-s false)))))]
+              (when end
+                {:prefix (subs s 0 (inc i))
+                 :inner  (subs s (inc i) end)
+                 :suffix (subs s end)}))
+
+            :else (recur (inc i) in-str false)))))))
+
+(defn- split-at-commas
+  "Split s at depth-0 commas, respecting strings and nested delimiters."
+  [s]
+  (loop [i 0, depth 0, in-str false, escaped false, start 0, result []]
+    (if (>= i (count s))
+      (let [tail (str/trim (subs s start))]
+        (if (empty? tail) result (conj result tail)))
+      (let [c (nth s i)]
+        (cond
+          escaped                     (recur (inc i) depth in-str false start result)
+          (and (= c \\) in-str)       (recur (inc i) depth in-str true  start result)
+          (= c \")                    (recur (inc i) depth (not in-str) false start result)
+          in-str                      (recur (inc i) depth in-str false start result)
+
+          (or (= c \() (= c \[) (= c \{))
+          (recur (inc i) (inc depth) in-str false start result)
+
+          (or (= c \)) (= c \]) (= c \}))
+          (recur (inc i) (dec depth) in-str false start result)
+
+          (and (= c \,) (zero? depth))
+          (recur (inc i) depth in-str false (inc i)
+                 (conj result (str/trim (subs s start i))))
+
+          :else (recur (inc i) depth in-str false start result))))))
+
+(defn- quoted-delimiter?
+  "True if the prefix ends with a quoted delimiter: '[ '( '{ "
+  [prefix]
+  (let [n (count prefix)]
+    (and (>= n 2)
+         (= \' (nth prefix (- n 2))))))
+
+(defn- format-wide
+  "Recursively break s at comma boundaries when it exceeds max-width
+   at the given current-indent column.  Quoted data ('[...]) is never broken."
+  [s max-width current-indent]
+  (if (<= (+ current-indent (count s)) max-width)
+    s
+    (if-let [{:keys [prefix inner suffix]} (find-break-point s)]
+      (if (quoted-delimiter? prefix)
+        s ;; Don't break quoted data literals
+        (let [parts      (split-at-commas inner)
+              abs-indent (+ current-indent (count prefix))
+              indent-str (apply str (repeat abs-indent \space))]
+          (if (<= (count parts) 1)
+            ;; Single element — try breaking inside it
+            (let [formatted (format-wide inner max-width abs-indent)]
+              (if (= formatted inner) s (str prefix formatted suffix)))
+            ;; Multiple parts — break at commas
+            (str prefix
+                 (str/join (str ",\n" indent-str)
+                           (mapv #(format-wide % max-width abs-indent) parts))
+                 suffix))))
+      s)))
+
+(defn- format-rendered
+  "Apply width-aware line breaking to a fully rendered superficie string."
+  [s max-width]
+  (str/join "\n"
+            (mapv (fn [line]
+                    (let [leading   (count (re-find #"^ *" line))
+                          trimmed   (str/triml line)
+                          formatted (format-wide trimmed max-width leading)]
+                      (if (= trimmed formatted)
+                        line
+                        (str (apply str (repeat leading \space)) formatted))))
+                  (str/split-lines s))))
 
 ;; --- Top-level API ---
 
@@ -720,14 +842,17 @@
             lines []
             first? true]
        (if (empty? items)
-         (str/join "\n" lines)
+         (format-rendered (str/join "\n" lines) default-max-width)
          (let [{:keys [text line]} (first items)
                text-lines (str/split-lines text)
               ;; Add blank lines to reach the target line
               ;; Ensure at least 2 newlines (= 1 blank line) between forms
-               padding (if first?
-                         (max 0 (- line current-line))
-                         (max 2 (- line current-line)))
+              ;; Preserve original spacing; if rendered form overflows past the
+              ;; target line, just put the next form on the following line.
+               padding (let [natural (- line current-line)]
+                         (if first?
+                           (max 0 natural)
+                           (max (if (neg? natural) 1 0) natural)))
                padded-lines (into lines (repeat padding ""))
               ;; Add the rendered text lines
                new-lines (into padded-lines text-lines)

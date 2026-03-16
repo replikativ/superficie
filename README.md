@@ -265,6 +265,42 @@ clj -M -m superficie.main parse core.sup
 (parse/parse-string (slurp "src/myapp/core.sup"))
 ```
 
+### JavaScript / npm
+
+Superficie is available as an npm package for use in Node.js, build tools, and the browser. No JVM required.
+
+```bash
+npm install superficie
+```
+
+#### Node.js / build tools
+
+```javascript
+const { renderString, parseString } = require('superficie');
+
+// Clojure -> Superficie
+renderString('(defn f [x] (+ x 1))');
+// => 'defn f(x):\n  x + 1\nend'
+
+// Superficie -> Clojure
+parseString('defn f(x):\n  x + 1\nend');
+// => '(defn f [x] (+ x 1))'
+```
+
+Works with static site generators (Astro, Next.js, etc.) to automatically render Clojure code blocks as superficie at build time. See [datahike.io](https://github.com/replikativ/datahike.io) for a working example with a remark plugin.
+
+#### Browser
+
+A browser bundle is provided at `dist/browser/superficie.js`. It exposes a global `superficie` object:
+
+```html
+<script src="https://unpkg.com/superficie/dist/browser/superficie.js"></script>
+<script>
+  var result = superficie.renderString('(defn f [x] (+ x 1))');
+  console.log(result);
+</script>
+```
+
 ### Syntax Highlighting
 
 #### VS Code / TextMate

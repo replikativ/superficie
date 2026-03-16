@@ -334,6 +334,15 @@
 
    ;; Reader macros
    :quote-form (fn [x] (list 'quote x))
+   :quoted-collection identity
+   :quoted-vector (fn [& elems]
+                    (vec (mapcat #(if (and (seq? %) (= '& (first %)))
+                                    %
+                                    [%])
+                                 elems)))
+   :quoted-map    (fn [& entries] (apply hash-map (mapcat identity entries)))
+   :quoted-map-entry (fn [k v] [k v])
+   :quoted-set    (fn [& elems] (set elems))
    :minus-symbol (fn [_] '-)
    :var-form   (fn [sym] (list 'var sym))
 

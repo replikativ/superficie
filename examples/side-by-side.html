@@ -60,45 +60,35 @@
 
 <div id="examples"></div>
 
+<!-- Superficie: browser bundle (renders Clojure → Superficie live) + highlight.js plugin -->
+<script src="../dist/browser/superficie.js"></script>
 <script src="../dist/superficie.hljs.js"></script>
 <script>
 
+// Only Clojure source needed — superficie is rendered automatically
 const examples = [
   {
     title: "Namespace declaration",
     clojure: `(ns myapp.core
   (:require [clojure.string :as str]
-            [clojure.set :refer [union intersection]]))`,
-    superficie: `ns myapp.core
-  (:require [clojure.string :as str]
-            [clojure.set :refer [union intersection]])
-end`
+            [clojure.set :refer [union intersection]]))`
   },
   {
     title: "Definitions",
     clojure: `(def pi 3.14159)
 
 (defonce db-conn
-  (connect "localhost:5432"))`,
-    superficie: `def pi := 3.14159
-
-defonce db-conn := connect("localhost:5432")`
+  (connect "localhost:5432"))`
   },
   {
     title: "Function definition",
     clojure: `(defn greet [name]
-  (str "Hello, " name "!"))`,
-    superficie: `defn greet(name):
-  str("Hello, ", name, "!")
-end`
+  (str "Hello, " name "!"))`
   },
   {
     title: "Arithmetic with operator precedence",
     clojure: `(defn quadratic [a b c x]
-  (+ (* a x x) (* b x) c))`,
-    superficie: `defn quadratic(a, b, c, x):
-  a * x * x + b * x + c
-end`
+  (+ (* a x x) (* b x) c))`
   },
   {
     title: "Threading (pipes)",
@@ -107,14 +97,7 @@ end`
        (filter :active)
        (map :name)
        (sort)
-       (take 10)))`,
-    superficie: `defn process-users(users):
-  users
-    |> filter(:active)
-    |> map(:name)
-    |> sort()
-    |> take(10)
-end`
+       (take 10)))`
   },
   {
     title: "Control flow",
@@ -122,14 +105,7 @@ end`
   (cond
     (neg? x) :negative
     (zero? x) :zero
-    :else :positive))`,
-    superficie: `defn classify(x):
-  cond:
-    neg?(x) => :negative
-    zero?(x) => :zero
-    :else => :positive
-  end
-end`
+    :else :positive))`
   },
   {
     title: "Let flattening and if/else",
@@ -138,16 +114,7 @@ end`
     {:error "Division by zero"}
     (let [result (/ a b)
           rounded (Math/round result)]
-      {:value result :rounded rounded})))`,
-    superficie: `defn safe-divide(a, b):
-  if zero?(b):
-    {:error "Division by zero"}
-  else:
-    let result := a / b
-    let rounded := Math/round(result)
-    {:value result, :rounded rounded}
-  end
-end`
+      {:value result :rounded rounded})))`
   },
   {
     title: "Loop/recur",
@@ -155,16 +122,7 @@ end`
   (loop [i n acc 1]
     (if (<= i 1)
       acc
-      (recur (dec i) (* acc i)))))`,
-    superficie: `defn factorial(n):
-  loop i := n, acc := 1:
-    if i <= 1:
-      acc
-    else:
-      recur(dec(i), acc * i)
-    end
-  end
-end`
+      (recur (dec i) (* acc i)))))`
   },
   {
     title: "Try/catch and Java interop",
@@ -173,15 +131,7 @@ end`
     (Integer/parseInt s)
     (catch NumberFormatException e
       (println (str "Invalid: " (.getMessage e)))
-      nil)))`,
-    superficie: `defn parse-int(s):
-  try:
-    Integer/parseInt(s)
-  catch NumberFormatException e:
-    println(str("Invalid: ", e.getMessage()))
-    nil
-  end
-end`
+      nil)))`
   },
   {
     title: "For comprehension",
@@ -189,12 +139,7 @@ end`
   (for [x xs
         y ys
         :when (not= x y)]
-    [x y]))`,
-    superficie: `defn pairs(xs, ys):
-  for x in xs, y in ys, when x not= y:
-    [x, y]
-  end
-end`
+    [x y]))`
   },
   {
     title: "Higher-order functions",
@@ -204,25 +149,11 @@ end`
        (into {})))
 
 (transform-values {:a 1 :b 2 :c 3}
-                  (fn [x] (* x x)))`,
-    superficie: `defn transform-values(m, f):
-  m
-    |> map(fn([k, v]): [k, f(v)] end)
-    |> into({})
-end
-
-transform-values({:a 1, :b 2, :c 3},
-                 fn(x): x * x end)`
+                  (fn [x] (* x x)))`
   },
   {
     title: "Macros with syntax-quote",
-    clojure: `(defmacro unless [pred & body]
-  \`(if (not ~pred)
-     (do ~@body)))`,
-    superficie: `defmacro unless(pred, & body):
-  \`(if (not ~pred)
-     (do ~@body))
-end`
+    clojure: "(defmacro unless [pred & body]\n  `(if (not ~pred)\n     (do ~@body)))"
   },
   {
     title: "Reader forms: deref, quote, var",
@@ -230,23 +161,13 @@ end`
   (let [old @state
         new (swap! state f)]
     (println (quote swapped) old '-> new)
-    #'swap-and-log))`,
-    superficie: `defn swap-and-log(state, f):
-  let old := @state
-  let new := swap!(state, f)
-  println('swapped, old, '->, new)
-  #'swap-and-log
-end`
+    #'swap-and-log))`
   },
   {
     title: "Comments",
     clojure: `(defn area [r]
   ;; classic formula
-  (* Math/PI r r))`,
-    superficie: `defn area(r):
-  ;; classic formula
-  Math/PI * r * r
-end`
+  (* Math/PI r r))`
   },
   {
     title: "Hiccup UI component",
@@ -262,29 +183,14 @@ end`
       [:tr
        [:td name]
        [:td [:a {:href (str "mailto:" email)} email]]
-       [:td role]])]])`,
-    superficie: `defn user-table(users):
-  [:table.data-table,
-   [:thead,
-    [:tr, [:th, "Name"], [:th, "Email"], [:th, "Role"]]],
-   [:tbody,
-    for {:keys [name, email, role]} in users:
-      [:tr,
-       [:td, name],
-       [:td, [:a, {:href str("mailto:", email)}, email]],
-       [:td, role]]
-    end]]
-end`
+       [:td role]])]])`
   },
   {
     title: "Tagged literal inside ordinary data",
     clojure: `(def release
   {:version "0.2.0"
    :published-at #inst "2026-03-11"
-   :channel :preview})`,
-    superficie: `def release := {:version "0.2.0",
-                :published-at #inst "2026-03-11",
-                :channel :preview}`
+   :channel :preview})`
   },
   {
     title: "Reader conditional as exact raw island",
@@ -295,43 +201,38 @@ end`
 (defn process [data]
   (->> data
        (filter :active)
-       (map :name)))`,
-    superficie: `defn parse-int(s):
-  #?(:clj (Integer/parseInt s)
-     :cljs (js/parseInt s 10))
-end
-
-defn process(data):
-  data
-    |> filter(:active)
-    |> map(:name)
-end`
+       (map :name)))`
   },
   {
     title: "Inline comment form in rendered code",
     clojure: `(defn inspect-user [user]
   (comment user)
-  (:name user))`,
-    superficie: `defn inspect-user(user):
-  (comment user)
-  :name(user)
-end`
+  (:name user))`
   },
   {
     title: "Syntax-quote preserved literally",
-    clojure: `(defmacro emit-pair [a b]
-  \`[~a ~b ~@[]])`,
-    superficie: `defmacro emit-pair(a, b):
-  \`[~a ~b ~@[]]
-end`
+    clojure: "(defmacro emit-pair [a b]\n  `[~a ~b ~@[]])"
   }
 ];
 
+function escapeHtml(s) {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
 function renderExamples() {
   const container = document.getElementById('examples');
-  container.innerHTML = examples.map(ex => `
+  container.innerHTML = examples.map(ex => {
+    // Render superficie from Clojure source
+    let sup;
+    try {
+      sup = superficie.renderString(ex.clojure);
+    } catch (e) {
+      sup = ';; render error: ' + e.message;
+    }
+
+    return `
     <div class="example mode-sidebyside">
-      <div class="example-title">${ex.title}</div>
+      <div class="example-title">${escapeHtml(ex.title)}</div>
       <div class="tabs">
         <button class="tab-btn active" data-lang="clojure">Clojure</button>
         <button class="tab-btn" data-lang="superficie">Superficie</button>
@@ -343,11 +244,11 @@ function renderExamples() {
         </div>
         <div class="panel" data-lang="superficie">
           <div class="panel-label">Superficie</div>
-          <pre><code class="language-superficie">${hljs.highlight(ex.superficie, {language: 'superficie'}).value}</code></pre>
+          <pre><code class="language-superficie">${hljs.highlight(sup, {language: 'superficie'}).value}</code></pre>
         </div>
       </div>
-    </div>
-  `).join('');
+    </div>`;
+  }).join('');
 
   // Tab click handlers
   container.querySelectorAll('.tab-btn').forEach(btn => {

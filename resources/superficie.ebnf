@@ -196,7 +196,14 @@ map-entry = expr <_> expr
 set-literal = <'#{'> <_>? (expr (<_>? <','> <_>? expr)*)? <_>? <'}'>
 
 (* === Reader macros === *)
-quote-form = <"'"> (minus-symbol | sexp | primary)
+(* Quoted content is data — commas optional inside quoted collections *)
+quote-form = <"'"> (quoted-collection | minus-symbol | sexp | primary)
+quoted-collection = quoted-vector | quoted-map | quoted-set
+quoted-vector = <'['> <_>? (quoted-elem (<_>? <','>? <_>? quoted-elem)*)? <_>? <']'>
+<quoted-elem> = amp-param | quoted-collection | expr
+quoted-map = <'{'> <_>? (quoted-map-entry (<_>? <','>? <_>? quoted-map-entry)*)? <_>? <'}'>
+quoted-map-entry = expr <_> expr
+quoted-set = <'#{'> <_>? (expr (<_>? <','>? <_>? expr)*)? <_>? <'}'>
 minus-symbol = '-' !#'[a-zA-Z0-9_>]'
 var-form = <"#'"> symbol
 
@@ -229,8 +236,8 @@ char-literal = #'\\(newline|space|tab|backspace|formfeed|return|u[0-9a-fA-F]{4}|
 symbol = escaped-symbol
        | !reserved dotted-ns-symbol
        | !reserved dotted-symbol
-       | !reserved #'[a-zA-Z_*!?][a-zA-Z0-9_*+!\-?/$#><=%&\x27]*'
-       | !reserved #'->[a-zA-Z_*!?][a-zA-Z0-9_*+!\-?/$#><=%&\x27]*'
+       | !reserved #'[a-zA-Z_*!?$][a-zA-Z0-9_*+!\-?/$#><=%&\x27]*'
+       | !reserved #'->[a-zA-Z_*!?$][a-zA-Z0-9_*+!\-?/$#><=%&\x27]*'
        | operator-symbol
 (* Backtick-escaped symbols for reserved words used as identifiers: `end`, `if`, etc. *)
 escaped-symbol = <'`'> #'[a-zA-Z_.*!?\-][a-zA-Z0-9_.*+!\-?/$#><=%&\x27]*' <'`'>
