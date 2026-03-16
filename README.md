@@ -13,6 +13,8 @@ That initial unfamiliarity typically takes a few days to overcome. But a few day
 
 Superficie exists to remove that barrier. You write Clojure as normal. When you need to *show* it to someone, you render it to a syntax they can already read.
 
+**[Try the playground](https://replikativ.github.io/superficie/examples/playground.html)** — paste any Clojure code and see it rendered live.
+
 ## Quick Look
 
 <table>
@@ -87,7 +89,7 @@ end
 </tr>
 </table>
 
-See [`examples/side-by-side.html`](https://replikativ.github.io/superficie/examples/side-by-side.html) for a full interactive comparison with syntax highlighting.
+**[Try it live](https://replikativ.github.io/superficie/examples/playground.html)** — type Clojure and see the superficie rendering instantly, or browse the examples.
 
 ## What It Is (and Isn't)
 

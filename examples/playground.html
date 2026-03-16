@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Superficie – Side by Side</title>
+<title>Superficie – Playground</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/clojure.min.js"></script>
@@ -46,12 +46,49 @@
   .toggle:checked { background: #0366d6; }
   .toggle::after { content: ''; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; background: #fff; border-radius: 50%; transition: transform 0.2s; }
   .toggle:checked::after { transform: translateX(16px); }
+
+  /* Try it editor */
+  .try-section { margin-bottom: 2.5rem; }
+  .try-section h2 { margin-bottom: 0.75rem; font-size: 1.1rem; }
+  .try-editor { display: flex; gap: 0; border: 1px solid #e1e4e8; border-radius: 8px; overflow: hidden; background: #fff; }
+  @media (max-width: 767px) { .try-editor { flex-direction: column; } }
+  .try-pane { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .try-pane + .try-pane { border-left: 1px solid #e1e4e8; }
+  @media (max-width: 767px) { .try-pane + .try-pane { border-left: none; border-top: 1px solid #e1e4e8; } }
+  .try-pane-label { padding: 0.25rem 1rem; background: #f6f8fa; border-bottom: 1px solid #e1e4e8; font-size: 0.75rem; font-weight: 600; color: #586069; text-transform: uppercase; letter-spacing: 0.05em; display: flex; align-items: center; gap: 0.5rem; }
+  .try-pane-label select { font-size: 0.75rem; font-family: inherit; border: 1px solid #d1d5da; border-radius: 4px; padding: 0.1rem 0.3rem; background: #fff; color: #24292e; cursor: pointer; }
+  .try-input { width: 100%; min-height: 200px; border: none; outline: none; resize: vertical; padding: 1rem; font-family: "JetBrains Mono", "Fira Code", "SF Mono", Menlo, monospace; font-size: 0.875rem; line-height: 1.5; background: #fff; color: #24292e; tab-size: 2; }
+  .try-output { flex: 1; }
+  .try-output pre { margin: 0; padding: 1rem; min-height: 200px; font-size: 0.875rem; line-height: 1.5; overflow-x: auto; }
+  .try-output code { font-family: "JetBrains Mono", "Fira Code", "SF Mono", Menlo, monospace; }
+  .try-error { color: #cb2431; font-style: italic; }
 </style>
 </head>
 <body>
 
 <h1>Superficie</h1>
-<p class="subtitle">Surface syntax for Clojure — side by side comparison</p>
+<p class="subtitle">Surface syntax for Clojure — try it live, explore examples</p>
+
+<div class="try-section">
+  <h2>Try it</h2>
+  <div class="try-editor">
+    <div class="try-pane">
+      <div class="try-pane-label">
+        Clojure
+        <select id="snippet-select">
+          <option value="">— load example —</option>
+        </select>
+      </div>
+      <textarea id="try-input" class="try-input" spellcheck="false" placeholder="Type or paste Clojure code here..."></textarea>
+    </div>
+    <div class="try-pane">
+      <div class="try-pane-label">Superficie</div>
+      <div class="try-output">
+        <pre><code id="try-output" class="language-superficie"></code></pre>
+      </div>
+    </div>
+  </div>
+</div>
 
 <div class="controls">
   <label for="mode-toggle">Side by side</label>
@@ -270,6 +307,62 @@ document.getElementById('mode-toggle').addEventListener('change', (e) => {
 });
 
 renderExamples();
+
+// --- Try-it editor ---
+var tryInput = document.getElementById('try-input');
+var tryOutput = document.getElementById('try-output');
+var snippetSelect = document.getElementById('snippet-select');
+
+// Populate snippet dropdown from examples
+examples.forEach(function(ex, i) {
+  var opt = document.createElement('option');
+  opt.value = i;
+  opt.textContent = ex.title;
+  snippetSelect.appendChild(opt);
+});
+
+function updateOutput() {
+  var src = tryInput.value;
+  if (!src.trim()) {
+    tryOutput.className = 'language-superficie';
+    tryOutput.textContent = '';
+    return;
+  }
+  try {
+    var result = superficie.renderString(src);
+    tryOutput.className = 'language-superficie';
+    tryOutput.innerHTML = hljs.highlight(result, {language: 'superficie'}).value;
+  } catch (e) {
+    tryOutput.className = 'try-error';
+    tryOutput.textContent = e.message || 'Render error';
+  }
+}
+
+tryInput.addEventListener('input', updateOutput);
+
+// Handle tab key in textarea
+tryInput.addEventListener('keydown', function(e) {
+  if (e.key === 'Tab') {
+    e.preventDefault();
+    var start = this.selectionStart;
+    var end = this.selectionEnd;
+    this.value = this.value.substring(0, start) + '  ' + this.value.substring(end);
+    this.selectionStart = this.selectionEnd = start + 2;
+    updateOutput();
+  }
+});
+
+snippetSelect.addEventListener('change', function() {
+  if (this.value !== '') {
+    tryInput.value = examples[this.value].clojure;
+    updateOutput();
+    this.value = '';
+  }
+});
+
+// Load first example on page load
+tryInput.value = examples[0].clojure;
+updateOutput();
 </script>
 </body>
 </html>
