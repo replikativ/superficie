@@ -200,10 +200,11 @@ set-literal = <'#{'> <_>? (expr (<_>? <','> <_>? expr)*)? <_>? <'}'>
 quote-form = <"'"> (quoted-collection | minus-symbol | sexp | primary)
 quoted-collection = quoted-vector | quoted-map | quoted-set
 quoted-vector = <'['> <_>? (quoted-elem (<_>? <','>? <_>? quoted-elem)*)? <_>? <']'>
-<quoted-elem> = amp-param | quoted-collection | expr
+<quoted-elem> = amp-param | quoted-collection | sexp | expr
 quoted-map = <'{'> <_>? (quoted-map-entry (<_>? <','>? <_>? quoted-map-entry)*)? <_>? <'}'>
-quoted-map-entry = expr <_> expr
-quoted-set = <'#{'> <_>? (expr (<_>? <','>? <_>? expr)*)? <_>? <'}'>
+quoted-map-entry = quoted-val <_> quoted-val
+<quoted-val> = sexp | expr
+quoted-set = <'#{'> <_>? (quoted-val (<_>? <','>? <_>? quoted-val)*)? <_>? <'}'>
 minus-symbol = '-' !#'[a-zA-Z0-9_>]'
 var-form = <"#'"> symbol
 
