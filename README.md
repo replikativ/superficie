@@ -311,17 +311,49 @@ end
 
 ### Pipeline
 
-Superficie uses a hand-written **LL parser** with three stages:
+Superficie uses a hand-written **LL parser** with four stages inspired by [Racket's shrubbery notation](https://docs.racket-lang.org/shrubbery/):
 
 ```
 source text
-  → scanner    (characters → tokens, handles strings, comments, operators)
-  → grouper    (tokens → bracket-balanced groups, error-resilient — reports
-                all grouping errors before aborting)
-  → reader     (groups → Clojure forms, block dispatch by keyword)
+  → tokenizer  (characters → flat token vector; throws on unterminated strings)
+  → grouper    (tokens → shrubbery tree; NEVER throws — bracket errors become
+                ShrubError nodes embedded in the valid surrounding tree)
+  → enforest   (shrubbery → healed token stream; re-wraps partial bracket
+                children with synthetic delimiters; drops stray closers)
+  → reader     (token stream → Clojure forms; LL(1) recursive-descent with
+                block dispatch by keyword and Pratt infix climbing)
 ```
 
-The reader is an LL(1) recursive-descent parser. Each `block-dispatch` entry maps a surface keyword (`"defn"`, `"if"`, `"for"`, …) to a parse function that consumes the rest of the line and the indented body. Forms that don't match any block keyword are parsed as infix expressions or function calls.
+The key design choice is the **two-phase bracket / semantic split**:
+
+- The **grouper** resolves bracket structure and reports *all* structural
+  errors without aborting. `f(x]` produces `(f x)` with an attached
+  `ShrubError`; the surrounding code is still parsed correctly.
+- The **reader** handles semantics: block keywords, operator precedence,
+  and namespace resolution. Semantic errors throw `ex-info` with
+  structured `:line`, `:col`, `:source-context`, and `:hint` data.
+
+This is the same separation Rust's compiler and Racket's Rhombus use: construct the bracket/token tree first (where recovery is mechanical), then parse semantics against a structurally valid input.
+
+Error messages are formatted with source context and underlines:
+
+```
+Error: Expected 'end' to close defn block (line 2, col 7)
+2 |   x + 1
+  |       ^
+
+Error: Unterminated string — missing closing " (line 2, col 7)
+2 |   str("hello x)
+  |       ^
+
+Error: Maximum nesting depth (150) exceeded (line 1, col 301)
+1 | f(f(f(f(f(f(f( ...
+  |                ^
+```
+
+The `errors/format-error` function turns any superficie `ex-info` into this format, and is also available to users building tooling on top of the parser.
+
+Each `block-dispatch` entry maps a surface keyword (`"defn"`, `"if"`, `"for"`, …) to a parse function that consumes the rest of the line and the indented body. Forms that don't match any block keyword are parsed as infix expressions or function calls via Pratt climbing.
 
 ### Block Registration
 

@@ -92,7 +92,7 @@
             (when-let [role (runtime/resolve-role-for-var v)]
               (when-let [kind (get role->block-kind role)]
                 (swap! reader/block-dispatch assoc qsym kind))))
-          qsym)))))
+          qsym))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Public eval-context helpers (used by superficie.repl and other consumers)
