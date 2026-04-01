@@ -297,15 +297,24 @@ end
 
 User-defined macros are called with function syntax (`unless(pred body)`). Block syntax (`unless pred: body end`) is reserved for macros registered in the block registry — either built-in forms or library macros that explicitly declare their surface block kind via `:superficie/role` metadata.
 
-### S-Expression Escape Hatch
+### Function Call Fallback
 
-Truly unusual forms (non-standard reader macros, platform-specific dispatch) pass through as raw S-expressions. The renderer never fails:
+The renderer never fails. Any Clojure form that doesn't match a known block pattern or operator is rendered using function call syntax — `f(a b c)` — which is always valid superficie and always round-trips cleanly:
+
+```clojure
+;; Clojure
+(defmacro my-macro [x]
+  (list 'if x :yes :no))
+```
 
 ```
+;; Superficie — list call renders as a regular function call
 defmacro my-macro [x]:
-  (list 'if x :yes :no)
+  list('if x :yes :no)
 end
 ```
+
+Note: `(...)` in superficie is **grouping for infix**, not a raw S-expression form — `(a + b) * c`. To write a literal quoted list in superficie source, use `'(...)`: `'(if x :yes :no)` reads back as `(quote (if x :yes :no))`.
 
 ## How It Works
 
