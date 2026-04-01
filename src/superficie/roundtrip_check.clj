@@ -32,10 +32,10 @@
      {:name "core.async" :path (str dev "/core.async")  :src-only? true}
      {:name "malli"      :path (str dev "/malli")       :src-only? true}
      {:name "datascript" :path (str dev "/datascript")  :src-only? true}
-     {:name "clara-rules":path (str dev "/clara-rules") :src-only? true}
+     {:name "clara-rules" :path (str dev "/clara-rules") :src-only? true}
      {:name "sci"        :path (str dev "/sci")         :src-only? true}
      {:name "konserve"   :path (str dev "/konserve")    :src-only? true}
-     {:name "rewrite-clj":path (str dev "/rewrite-clj") :src-only? true}
+     {:name "rewrite-clj" :path (str dev "/rewrite-clj") :src-only? true}
      {:name "babashka"   :path (str dev "/babashka")    :src-only? true}
      {:name "electric"   :path (str dev "/electric")    :src-only? true}
      {:name "onyx"       :path (str dev "/onyx")        :src-only? true}
@@ -201,7 +201,7 @@
             (swap! rows conj row)))))
     (let [all-rows   @rows
           total-pass (reduce + 0 (map :pass all-rows))
-          total-files(reduce + 0 (map :total all-rows))
+          total-files (reduce + 0 (map :total all-rows))
           elapsed    (/ (- (System/currentTimeMillis) t0) 1000.0)]
       (println)
       (println (format "Total: %d / %d files pass  (%.1fs)" total-pass total-files elapsed))
@@ -223,5 +223,5 @@
                               paths)
                         default-projects)]
     (System/exit (run-checks {:projects      projects
-                               :verbose?      verbose?
-                               :summary-only? summary-only?}))))
+                              :verbose?      verbose?
+                              :summary-only? summary-only?}))))

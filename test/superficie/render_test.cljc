@@ -188,6 +188,6 @@
 ;; ---------------------------------------------------------------------------
 
 #?(:clj
-(deftest test-reader-conditional-in-output
-  (let [result (core/clj->sup "#?(:clj (def x 1) :cljs (def x 2))")]
-    (is (re-find #"#\?" result)))))
+   (deftest test-reader-conditional-in-output
+     (let [result (core/clj->sup "#?(:clj (def x 1) :cljs (def x 2))")]
+       (is (re-find #"#\?" result)))))

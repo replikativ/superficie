@@ -181,20 +181,20 @@
 ;; ---------------------------------------------------------------------------
 
 #?(:clj
-(deftest test-reader-conditional
-  (testing "reader conditional preserved with :read-cond :preserve"
-    (let [forms (core/sup->forms "#?(:clj 1 :cljs 2)" {:read-cond :preserve})]
-      (is (= 1 (count forms)))
-      (is (reader-conditional? (first forms)))))
-  (testing "reader conditional evaluated for current platform"
-    (let [forms (core/sup->forms "#?(:clj :jvm :cljs :js)")]
-      (is (= 1 (count forms)))
-      (is (= :jvm (first forms)))))))
+   (deftest test-reader-conditional
+     (testing "reader conditional preserved with :read-cond :preserve"
+       (let [forms (core/sup->forms "#?(:clj 1 :cljs 2)" {:read-cond :preserve})]
+         (is (= 1 (count forms)))
+         (is (reader-conditional? (first forms)))))
+     (testing "reader conditional evaluated for current platform"
+       (let [forms (core/sup->forms "#?(:clj :jvm :cljs :js)")]
+         (is (= 1 (count forms)))
+         (is (= :jvm (first forms)))))))
 
 #?(:clj
-(deftest test-tagged-literal
-  (let [forms (core/sup->forms "#inst \"2024-01-01\"")]
-    (is (= 1 (count forms))))))
+   (deftest test-tagged-literal
+     (let [forms (core/sup->forms "#inst \"2024-01-01\"")]
+       (is (= 1 (count forms))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Symbols

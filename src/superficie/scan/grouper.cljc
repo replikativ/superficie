@@ -106,8 +106,8 @@
       ;; EOF — unclosed container
       (nil? stop-tok)
       (f/->ShrubError
-        (str "Unclosed " (open-name open-type) " — expected " (close-name exp-close))
-        items loc exp-close nil open-type)
+       (str "Unclosed " (open-name open-type) " — expected " (close-name exp-close))
+       items loc exp-close nil open-type)
 
       ;; Correct matching close
       (= (:type stop-tok) exp-close)
@@ -117,10 +117,10 @@
       ;; Wrong close delimiter — do NOT consume it; let the parent handle it
       :else
       (f/->ShrubError
-        (str "Expected " (close-name exp-close)
-             " to close " (open-name open-type)
-             " but found " (or (close-name (:type stop-tok)) (:value stop-tok)))
-        items loc exp-close stop-tok open-type))))
+       (str "Expected " (close-name exp-close)
+            " to close " (open-name open-type)
+            " but found " (or (close-name (:type stop-tok)) (:value stop-tok)))
+       items loc exp-close stop-tok open-type))))
 
 (defn- group-item
   "Parse one shrubbery item, consuming the relevant token(s).
@@ -141,9 +141,9 @@
       (contains? all-close-types type)
       (do (gadvance! g)
           (f/->ShrubError
-            (str "Unexpected " (close-name type)
-                 " — no matching open delimiter")
-            [] (gloc tok) nil tok nil))
+           (str "Unexpected " (close-name type)
+                " — no matching open delimiter")
+           [] (gloc tok) nil tok nil))
 
       ;; Everything else: leaf token
       :else
@@ -166,9 +166,9 @@
       ;; At the top level, any stop-tok is an unexpected closer
       (let [items' (if stop
                      (conj items (f/->ShrubError
-                                   (str "Unexpected " (close-name (:type stop))
-                                        " at top level")
-                                   [] (gloc stop) nil stop nil))
+                                  (str "Unexpected " (close-name (:type stop))
+                                       " at top level")
+                                  [] (gloc stop) nil stop nil))
                      items)]
         ;; After consuming the stop-tok (if any), continue draining remaining tokens
         (if stop

@@ -33,8 +33,8 @@
    (let [loc-suffix (when (and line col) (str " (line " line ", col " col ")"))
          full-msg   (str msg loc-suffix)
          ex-data    (cond-> (dissoc data :cause :source)
-                     (and source line)
-                     (assoc :source-context (source-context source line)))]
+                      (and source line)
+                      (assoc :source-context (source-context source line)))]
      (throw (ex-info full-msg ex-data cause)))))
 
 ;; ---------------------------------------------------------------------------
@@ -75,7 +75,7 @@
          ctx-line (or (when (and source line) (source-context source line))
                       (:source-context data))
          all-lines (cond-> [] line (conj line)
-                     secondary (into (keep :line secondary)))
+                           secondary (into (keep :line secondary)))
          w (if (seq all-lines) (count (str (apply max all-lines))) 1)
          out (volatile! [(str "Error: " msg)])]
      (when ctx-line

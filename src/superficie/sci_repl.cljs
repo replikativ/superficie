@@ -94,27 +94,27 @@
 
 (defn- make-ctx []
   (sci/init
-    {:print-fn   (fn [s] (swap! out-buf conj s))
-     :classes    {'Math js/Math}
-     :namespaces
-     {;; Register match in clojure.core.match for qualified require
-      'clojure.core.match {'match  sci-match-macro
-                           'match* sci-match-macro}
+   {:print-fn   (fn [s] (swap! out-buf conj s))
+    :classes    {'Math js/Math}
+    :namespaces
+    {;; Register match in clojure.core.match for qualified require
+     'clojure.core.match {'match  sci-match-macro
+                          'match* sci-match-macro}
       ;; superficie.operators: Haskell-inspired stdlib ops
-      'superficie.operators {'<$> ops/<$>
-                             '<*> ops/<*>
-                             '>>=  ops/>>=
-                             '**   ops/**
-                             '>>   ops/>>
-                             '<<   ops/<<}
+     'superficie.operators {'<$> ops/<$>
+                            '<*> ops/<*>
+                            '>>=  ops/>>=
+                            '**   ops/**
+                            '>>   ops/>>
+                            '<<   ops/<<}
       ;; Also register bare names in user namespace for unqualified surface syntax
-      'user               {'match  sci-match-macro
-                           '<$>   ops/<$>
-                           '<*>   ops/<*>
-                           '>>=   ops/>>=
-                           '**    ops/**
-                           '>>    ops/>>
-                           '<<    ops/<<}}}))
+     'user               {'match  sci-match-macro
+                          '<$>   ops/<$>
+                          '<*>   ops/<*>
+                          '>>=   ops/>>=
+                          '**    ops/**
+                          '>>    ops/>>
+                          '<<    ops/<<}}}))
 
 (defonce ctx (atom (make-ctx)))
 

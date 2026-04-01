@@ -155,10 +155,10 @@
          (let [ctx (get closer-context end-type "expression")
                closer (get closer-name end-type (name end-type))]
            (errors/reader-error
-             (str "Unclosed " ctx " — expected " closer " but reached end of input")
-             (error-data p (cond-> (assoc (plast-loc p) :incomplete true)
-                             open-loc (assoc :secondary [{:line (:line open-loc) :col (:col open-loc) :label "opened here"}])
-                             open-loc (assoc :hint (str "Add " (get token-name end-type (name end-type)) " to close this " ctx)))))))
+            (str "Unclosed " ctx " — expected " closer " but reached end of input")
+            (error-data p (cond-> (assoc (plast-loc p) :incomplete true)
+                            open-loc (assoc :secondary [{:line (:line open-loc) :col (:col open-loc) :label "opened here"}])
+                            open-loc (assoc :hint (str "Add " (get token-name end-type (name end-type)) " to close this " ctx)))))))
        (let [tok (ppeek p)]
          (cond
            ;; Correct closer — done
@@ -171,10 +171,10 @@
                  actual (get token-name (:type tok) (name (:type tok)))
                  ctx (get closer-context end-type "expression")]
              (errors/reader-error
-               (str "Mismatched delimiter — expected " expected " to close " ctx " but got " actual)
-               (error-data p (cond-> (select-keys tok [:line :col])
-                               open-loc (assoc :secondary [{:line (:line open-loc) :col (:col open-loc) :label "opened here"}])
-                               open-loc (assoc :hint (str "Replace " actual " with " expected " to close this " ctx))))))
+              (str "Mismatched delimiter — expected " expected " to close " ctx " but got " actual)
+              (error-data p (cond-> (select-keys tok [:line :col])
+                              open-loc (assoc :secondary [{:line (:line open-loc) :col (:col open-loc) :label "opened here"}])
+                              open-loc (assoc :hint (str "Replace " actual " with " expected " to close this " ctx))))))
 
            ;; Normal form — parse and accumulate.
            ;; In sexp-mode (inside quoted lists) use parse-form (no infix).
@@ -200,13 +200,13 @@
     (let [forms (parse-forms-until p :close-brace loc)]
       (when (odd? (count forms))
         (errors/reader-error (str "Map literal requires an even number of forms, but got " (count forms))
-                           (error-data p (assoc loc :hint "Maps need key-value pairs — check for a missing key or value"))))
+                             (error-data p (assoc loc :hint "Maps need key-value pairs — check for a missing key or value"))))
       (let [m (apply array-map forms)
             keys (take-nth 2 forms)]
         (when (not= (count m) (/ (count forms) 2))
           (let [dup (first (filter (fn [k] (> (count (filter #(= k %) keys)) 1)) keys))]
             (errors/reader-error (str "Duplicate key in map literal: " (pr-str dup))
-                               (error-data p loc))))
+                                 (error-data p loc))))
         m))))
 
 (defn- parse-set [p]
@@ -218,7 +218,7 @@
         (let [seen (volatile! #{})
               dup (first (filter (fn [x] (if (contains? @seen x) true (do (vswap! seen conj x) false))) forms))]
           (errors/reader-error (str "Duplicate element in set literal: " (pr-str dup))
-                             (error-data p loc))))
+                               (error-data p loc))))
       (with-meta s {:sup/order (vec forms)}))))
 
 ;; ---------------------------------------------------------------------------
@@ -229,7 +229,6 @@
   (let [loc (select-keys (ppeek p) [:line :col])]
     (padvance! p) ; (
     (parse-forms-until p :close-paren loc)))
-
 
 ;; ---------------------------------------------------------------------------
 ;; #() anonymous function — % param helpers
@@ -312,7 +311,6 @@
     (cond-> (mapv #(symbol (str "%" %)) (range 1 (inc max-n)))
       has-rest? (into ['& (symbol "%&")]))))
 
-
 ;; ---------------------------------------------------------------------------
 ;; Main parse dispatch
 ;; ---------------------------------------------------------------------------
@@ -341,9 +339,9 @@
     (cond
       (peof? p)
       (errors/reader-error (str "Unclosed reader conditional — expected ) but reached end of input")
-                         (error-data p (cond-> (assoc loc :incomplete true)
-                                         loc (assoc :secondary [{:line (:line loc) :col (:col loc) :label "opened here"}])
-                                         loc (assoc :hint "Add ) to close this reader conditional"))))
+                           (error-data p (cond-> (assoc loc :incomplete true)
+                                           loc (assoc :secondary [{:line (:line loc) :col (:col loc) :label "opened here"}])
+                                           loc (assoc :hint "Add ) to close this reader conditional"))))
 
       (tok-type? (ppeek p) :close-paren)
       (do (padvance! p)
@@ -353,7 +351,7 @@
       (let [key-tok (ppeek p)]
         (when-not (tok-type? key-tok :keyword)
           (errors/reader-error (str "Expected platform keyword in reader conditional, got " (describe-token key-tok))
-                             (error-data p (select-keys key-tok [:line :col]))))
+                               (error-data p (select-keys key-tok [:line :col]))))
         (let [platform-key (keyword (subs (:value key-tok) 1))]
           (padvance! p)
           ;; Use parse-expr so infix expressions (a and b) work as reader-cond values
@@ -369,9 +367,9 @@
       (cond
         (peof? p)
         (errors/reader-error (str "Unclosed reader conditional — expected ) but reached end of input")
-                           (error-data p (cond-> (assoc loc :incomplete true)
-                                           loc (assoc :secondary [{:line (:line loc) :col (:col loc) :label "opened here"}])
-                                           loc (assoc :hint "Add ) to close this reader conditional"))))
+                             (error-data p (cond-> (assoc loc :incomplete true)
+                                             loc (assoc :secondary [{:line (:line loc) :col (:col loc) :label "opened here"}])
+                                             loc (assoc :hint "Add ) to close this reader conditional"))))
 
         (tok-type? (ppeek p) :close-paren)
         (do (padvance! p)
@@ -381,8 +379,8 @@
                 (if (sequential? matched)
                   (splice-result matched)
                   (errors/reader-error
-                    "Splicing reader conditional value must be a list or vector"
-                    (error-data p loc)))
+                   "Splicing reader conditional value must be a list or vector"
+                   (error-data p loc)))
                 (maybe-call p matched))))
 
         ;; Already matched — consume remaining forms permissively until ).
@@ -397,7 +395,7 @@
         (let [key-tok (ppeek p)]
           (when-not (tok-type? key-tok :keyword)
             (errors/reader-error (str "Expected platform keyword in reader conditional, got " (describe-token key-tok))
-                               (error-data p (select-keys key-tok [:line :col]))))
+                                 (error-data p (select-keys key-tok [:line :col]))))
           (let [platform-key (keyword (subs (:value key-tok) 1))]
             (padvance! p)
             ;; Use parse-expr so infix expressions (a and b) work as reader-cond values
@@ -512,9 +510,8 @@
   (when-not colon-in-prior?
     (when-not (colon-tok? (ppeek p))
       (errors/reader-error (str "Expected ':' to start " context-msg " block")
-                         (error-data p loc)))
+                           (error-data p loc)))
     (padvance! p)))
-
 
 (declare wrap-body-lets)
 
@@ -543,7 +540,7 @@
     (cond
       (peof? p)
       (errors/reader-error "Unclosed defn block — expected 'end'"
-                         (error-data p (assoc (plast-loc p) :incomplete true)))
+                           (error-data p (assoc (plast-loc p) :incomplete true)))
 
       (end-symbol? (ppeek p))
       (do (padvance! p) arities)
@@ -556,7 +553,7 @@
 
       :else
       (errors/reader-error "Expected parameter vector '[...]' or 'end' in defn block"
-                         (error-data p (select-keys (ppeek p) [:line :col]))))))
+                           (error-data p (select-keys (ppeek p) [:line :col]))))))
 
 (defn- parse-defn-block
   "Parse: defn name [params]: body end
@@ -577,13 +574,13 @@
         _ (when-not (or (tok-type? (ppeek p) :open-bracket)
                         (tok-type? (ppeek p) :meta))
             (errors/reader-error (str "Expected parameter vector '[...]' in " (clojure.core/name form-sym))
-                               (error-data p (select-keys (or (ppeek p) tok) [:line :col]))))
+                                 (error-data p (select-keys (or (ppeek p) tok) [:line :col]))))
         params (if (tok-type? (ppeek p) :open-bracket) (parse-vector p) (parse-form p))
         _ (consume-colon! p false (clojure.core/name form-sym) (select-keys tok [:line :col]))
         body (parse-body p)
         _ (when-not (end-symbol? (ppeek p))
             (errors/reader-error (str "Expected 'end' to close " (clojure.core/name form-sym) " block")
-                               (error-data p (plast-loc p))))
+                                 (error-data p (plast-loc p))))
         _ (padvance! p)]
     (apply list form-sym name-sym
            (concat (when docstring [docstring])
@@ -606,13 +603,13 @@
          _ (when-not (or (tok-type? (ppeek p) :open-bracket)
                          (tok-type? (ppeek p) :meta))
              (errors/reader-error "Expected parameter vector '[...]' after fn"
-                                (error-data p (select-keys tok [:line :col]))))
+                                  (error-data p (select-keys tok [:line :col]))))
          params (if (tok-type? (ppeek p) :open-bracket) (parse-vector p) (parse-form p))
          _ (consume-colon! p false "fn" (select-keys tok [:line :col]))
          body (parse-body p)
          _ (when-not (end-symbol? (ppeek p))
              (errors/reader-error "Expected 'end' to close fn block"
-                                (error-data p (plast-loc p))))
+                                  (error-data p (plast-loc p))))
          _ (padvance! p)]
      (apply list form-sym (concat (when name-sym [name-sym]) [params] body)))))
 
@@ -645,7 +642,7 @@
                       (parse-body p)))
         _ (when-not (end-symbol? (ppeek p))
             (errors/reader-error "Expected 'end' to close if block"
-                               (error-data p (plast-loc p))))
+                                 (error-data p (plast-loc p))))
         _ (padvance! p)] ; consume end
     (if (= 'if form-sym)
       ;; Clojure's if takes exactly one then and one else — wrap multi-form bodies in do
@@ -667,7 +664,7 @@
   [p form-sym tok]
   (when-not (tok-type? (ppeek p) :open-bracket)
     (errors/reader-error (str "Expected '[bindings]' after " (name form-sym))
-                       (error-data p (select-keys tok [:line :col]))))
+                         (error-data p (select-keys tok [:line :col]))))
   (let [bindings (parse-vector p)
         _ (let [next-tok (ppeek p)]
             (if (and (tok-type? next-tok :symbol) (str/ends-with? (:value next-tok) ":"))
@@ -676,7 +673,7 @@
         body (parse-body p)
         _ (when-not (end-symbol? (ppeek p))
             (errors/reader-error "Expected 'end' to close let block"
-                               (error-data p (plast-loc p))))
+                                 (error-data p (plast-loc p))))
         _ (padvance! p)]
     (apply list form-sym bindings body)))
 
@@ -713,83 +710,83 @@
         [expr colon-in-expr] (strip-expr-colon raw-expr)
         _ (consume-colon! p colon-in-expr "case" (select-keys tok [:line :col]))]
     (let [no-default ::no-case-default]
-     (loop [clauses [] default no-default]
-      (cond
-        (peof? p)
-        (errors/reader-error "Unclosed case block — expected 'end'"
-                             (error-data p (assoc (plast-loc p) :incomplete true)))
+      (loop [clauses [] default no-default]
+        (cond
+          (peof? p)
+          (errors/reader-error "Unclosed case block — expected 'end'"
+                               (error-data p (assoc (plast-loc p) :incomplete true)))
 
-        (end-symbol? (ppeek p))
-        (do (padvance! p)
-            (apply list 'case expr
-                   (concat (apply concat clauses)
-                           (when-not (identical? default no-default) [default]))))
-
-        :else
-        (if (arrow-tok? (ppeek p))
-          ;; Bare => default (no pattern): "=> value"
+          (end-symbol? (ppeek p))
           (do (padvance! p)
-              (recur clauses (parse-expr p)))
-          (let [raw-pat (parse-expr p)
-                _ (when-not (arrow-tok? (ppeek p))
-                    (errors/reader-error "Expected '=>' in case clause"
-                                         (error-data p (plast-loc p))))
-                _ (padvance! p)
-                result (parse-expr p)
+              (apply list 'case expr
+                     (concat (apply concat clauses)
+                             (when-not (identical? default no-default) [default]))))
+
+          :else
+          (if (arrow-tok? (ppeek p))
+          ;; Bare => default (no pattern): "=> value"
+            (do (padvance! p)
+                (recur clauses (parse-expr p)))
+            (let [raw-pat (parse-expr p)
+                  _ (when-not (arrow-tok? (ppeek p))
+                      (errors/reader-error "Expected '=>' in case clause"
+                                           (error-data p (plast-loc p))))
+                  _ (padvance! p)
+                  result (parse-expr p)
                 ;; '(a b c) in a case test means multi-dispatch list, not a quoted
                 ;; form — strip the quote wrapper to get the bare list Clojure expects.
-                pat (if (and (seq? raw-pat) (= 'quote (first raw-pat)) (= 2 (count raw-pat)))
-                      (second raw-pat)
-                      raw-pat)]
-            (recur (conj clauses [pat result]) default))))))))
+                  pat (if (and (seq? raw-pat) (= 'quote (first raw-pat)) (= 2 (count raw-pat)))
+                        (second raw-pat)
+                        raw-pat)]
+              (recur (conj clauses [pat result]) default))))))))
 
 (defn- parse-try-block
   "Parse: try: body [catch [ExType e]: handler]* [finally: cleanup] end"
   ([p form-sym tok] (parse-try-block p form-sym tok false))
   ([p _form-sym tok colon-in-kw?]
-  (let [_ (consume-colon! p colon-in-kw? "try" (select-keys tok [:line :col]))
-        body (parse-body p)]
-    (loop [clauses []]
-      (cond
-        (peof? p)
-        (errors/reader-error "Unclosed try block — expected 'end'"
-                           (error-data p (assoc (plast-loc p) :incomplete true)))
+   (let [_ (consume-colon! p colon-in-kw? "try" (select-keys tok [:line :col]))
+         body (parse-body p)]
+     (loop [clauses []]
+       (cond
+         (peof? p)
+         (errors/reader-error "Unclosed try block — expected 'end'"
+                              (error-data p (assoc (plast-loc p) :incomplete true)))
 
-        (end-symbol? (ppeek p))
-        (do (padvance! p)
-            (apply list 'try (concat body clauses)))
+         (end-symbol? (ppeek p))
+         (do (padvance! p)
+             (apply list 'try (concat body clauses)))
 
-        (and (tok-type? (ppeek p) :symbol)
-             (#{"catch" "catch:"} (:value (ppeek p))))
-        (let [_ (padvance! p) ; consume catch/catch:
+         (and (tok-type? (ppeek p) :symbol)
+              (#{"catch" "catch:"} (:value (ppeek p))))
+         (let [_ (padvance! p) ; consume catch/catch:
               ;; catch needs [ExType e] binding
-              _ (when-not (tok-type? (ppeek p) :open-bracket)
-                  (errors/reader-error "Expected '[ExceptionType binding]' after catch"
-                                     (error-data p (select-keys (ppeek p) [:line :col]))))
-              binding (parse-vector p) ; [ExType e]
-              _ (consume-colon! p false "catch" (select-keys tok [:line :col]))
-              catch-body (parse-body p)]
-          (recur (conj clauses (apply list 'catch (concat binding catch-body)))))
+               _ (when-not (tok-type? (ppeek p) :open-bracket)
+                   (errors/reader-error "Expected '[ExceptionType binding]' after catch"
+                                        (error-data p (select-keys (ppeek p) [:line :col]))))
+               binding (parse-vector p) ; [ExType e]
+               _ (consume-colon! p false "catch" (select-keys tok [:line :col]))
+               catch-body (parse-body p)]
+           (recur (conj clauses (apply list 'catch (concat binding catch-body)))))
 
-        (and (tok-type? (ppeek p) :symbol)
-             (#{"finally" "finally:"} (:value (ppeek p))))
-        (let [finally-val (:value (ppeek p))
-              _ (padvance! p) ; consume finally/finally:
-              colon-in-finally? (str/ends-with? finally-val ":")
-              _ (consume-colon! p colon-in-finally? "finally" (select-keys tok [:line :col]))
-              finally-body (parse-body p)]
-          (recur (conj clauses (apply list 'finally finally-body))))
+         (and (tok-type? (ppeek p) :symbol)
+              (#{"finally" "finally:"} (:value (ppeek p))))
+         (let [finally-val (:value (ppeek p))
+               _ (padvance! p) ; consume finally/finally:
+               colon-in-finally? (str/ends-with? finally-val ":")
+               _ (consume-colon! p colon-in-finally? "finally" (select-keys tok [:line :col]))
+               finally-body (parse-body p)]
+           (recur (conj clauses (apply list 'finally finally-body))))
 
-        :else
-        (errors/reader-error "Expected 'catch', 'finally', or 'end' in try block"
-                           (error-data p (select-keys (ppeek p) [:line :col]))))))))
+         :else
+         (errors/reader-error "Expected 'catch', 'finally', or 'end' in try block"
+                              (error-data p (select-keys (ppeek p) [:line :col]))))))))
 
 (defn- parse-for-block
   "Parse: for [bindings]: body end  (also doseq, loop, dotimes)"
   [p form-sym tok]
   (when-not (tok-type? (ppeek p) :open-bracket)
     (errors/reader-error (str "Expected '[bindings]' after " (name form-sym))
-                       (error-data p (select-keys tok [:line :col]))))
+                         (error-data p (select-keys tok [:line :col]))))
   (let [bindings (parse-vector p)
         _ (let [next-tok (ppeek p)]
             (if (and (tok-type? next-tok :symbol) (str/ends-with? (:value next-tok) ":"))
@@ -798,7 +795,7 @@
         body (parse-body p)
         _ (when-not (end-symbol? (ppeek p))
             (errors/reader-error (str "Expected 'end' to close " (name form-sym) " block")
-                               (error-data p (plast-loc p))))
+                                 (error-data p (plast-loc p))))
         _ (padvance! p)]
     (apply list form-sym bindings body)))
 
@@ -943,9 +940,9 @@
 
         :else
         (errors/reader-error
-          (str "Expected sub-clause keyword (require:, import:, etc.) or 'end' in ns block, got: "
-               (:value (ppeek p)))
-          (error-data p (select-keys (ppeek p) [:line :col])))))))
+         (str "Expected sub-clause keyword (require:, import:, etc.) or 'end' in ns block, got: "
+              (:value (ppeek p)))
+         (error-data p (select-keys (ppeek p) [:line :col])))))))
 
 ;; ---------------------------------------------------------------------------
 ;; defmethod block
@@ -1476,9 +1473,9 @@
   [sym]
   (when (symbol? sym)
     (boolean
-      (or (:comparison (get @ops/*op-registry* sym))
-          (when (nil? (namespace sym))
-            (:comparison (get @ops/*op-registry* (symbol "clojure.core" (name sym)))))))))
+     (or (:comparison (get @ops/*op-registry* sym))
+         (when (nil? (namespace sym))
+           (:comparison (get @ops/*op-registry* (symbol "clojure.core" (name sym)))))))))
 
 (defn- build-binary
   "Combine left op right, handling:
@@ -1700,8 +1697,8 @@
             (if (tok-type? (ppeek p) :close-paren)
               (do (padvance! p) inner)
               (errors/reader-error
-                "Parenthesized group must contain a single expression — use f(args) for calls"
-                (error-data p loc))))))
+               "Parenthesized group must contain a single expression — use f(args) for calls"
+               (error-data p loc))))))
 
       :open-bracket (maybe-call p (parse-vector p))
       :open-brace (maybe-call p (parse-map p))
@@ -1712,7 +1709,7 @@
           (let [inner (parse-form p)]
             (when (discard-sentinel? inner)
               (errors/reader-error "Deref target was discarded by #_ — nothing to dereference"
-                                (error-data p (select-keys tok [:line :col]))))
+                                   (error-data p (select-keys tok [:line :col]))))
             (with-meta (list 'clojure.core/deref inner) {:sup/sugar true})))
 
       :meta
@@ -1720,19 +1717,19 @@
           (let [m (parse-form p)
                 _ (when (discard-sentinel? m)
                     (errors/reader-error "Metadata value was discarded by #_ — nothing to attach as metadata"
-                                      (error-data p (select-keys tok [:line :col]))))
+                                         (error-data p (select-keys tok [:line :col]))))
                 target (parse-form p)
                 _ (when (discard-sentinel? target)
                     (errors/reader-error "Metadata target was discarded by #_ — nothing to attach metadata to"
-                                      (error-data p (select-keys tok [:line :col]))))]
+                                         (error-data p (select-keys tok [:line :col]))))]
             (let [entry (cond
                           (keyword? m) {m true}
                           (symbol? m)  {:tag m}
                           (map? m)     m
                           :else
                           (errors/reader-error
-                            (str "Metadata must be a keyword, symbol, or map — got " (pr-str m))
-                            (error-data p (select-keys tok [:line :col]))))
+                           (str "Metadata must be a keyword, symbol, or map — got " (pr-str m))
+                           (error-data p (select-keys tok [:line :col]))))
                   chain (conj (or (:sup/meta-chain (meta target)) []) entry)]
               (vary-meta target merge entry {:sup/meta-chain chain}))))
 
@@ -1751,7 +1748,7 @@
                              (when-not sexp? (vreset! (:no-block p) false))))]
             (when (discard-sentinel? inner)
               (errors/reader-error "Quote target was discarded by #_ — nothing to quote"
-                                (error-data p (select-keys tok [:line :col]))))
+                                   (error-data p (select-keys tok [:line :col]))))
             (with-meta (list 'quote inner) {:sup/sugar true})))
 
       :syntax-quote
@@ -1763,7 +1760,7 @@
                           (finally (vswap! (:sq-depth p) dec)))]
             (when (discard-sentinel? form)
               (errors/reader-error "Syntax-quote target was discarded by #_ — nothing to syntax-quote"
-                                (error-data p (select-keys tok [:line :col]))))
+                                   (error-data p (select-keys tok [:line :col]))))
             (forms/->SupSyntaxQuote form)))
 
       :unquote
@@ -1772,10 +1769,10 @@
             (let [inner (parse-form p)]
               (when (discard-sentinel? inner)
                 (errors/reader-error "Unquote target was discarded by #_ — nothing to unquote"
-                                  (error-data p (select-keys tok [:line :col]))))
+                                     (error-data p (select-keys tok [:line :col]))))
               (forms/->SupUnquote inner)))
         (errors/reader-error "Unquote (~) outside syntax-quote — ~ only has meaning inside `"
-                           (error-data p (select-keys tok [:line :col]))))
+                             (error-data p (select-keys tok [:line :col]))))
 
       :unquote-splicing
       (if (pos? @(:sq-depth p))
@@ -1783,17 +1780,17 @@
             (let [inner (parse-form p)]
               (when (discard-sentinel? inner)
                 (errors/reader-error "Unquote-splicing target was discarded by #_ — nothing to unquote-splice"
-                                  (error-data p (select-keys tok [:line :col]))))
+                                     (error-data p (select-keys tok [:line :col]))))
               (forms/->SupUnquoteSplicing inner)))
         (errors/reader-error "Unquote-splicing (~@) outside syntax-quote — ~@ only has meaning inside `"
-                           (error-data p (select-keys tok [:line :col]))))
+                             (error-data p (select-keys tok [:line :col]))))
 
       :var-quote
       (do (padvance! p)
           (let [inner (parse-form p)]
             (when (discard-sentinel? inner)
               (errors/reader-error "Var-quote target was discarded by #_ — nothing to reference"
-                                (error-data p (select-keys tok [:line :col]))))
+                                   (error-data p (select-keys tok [:line :col]))))
             (with-meta (list 'var inner) {:sup/sugar true})))
 
       :discard
@@ -1807,7 +1804,7 @@
       (do (padvance! p)
           (when (peof? p)
             (errors/reader-error "Missing form after #_ — expected a form to discard"
-                               (error-data p (assoc (select-keys tok [:line :col]) :incomplete true))))
+                                 (error-data p (assoc (select-keys tok [:line :col]) :incomplete true))))
           (parse-form p) ; parse and discard
           (let [nxt (ppeek p)]
             (if (or (nil? nxt)
@@ -1821,7 +1818,7 @@
         (let [data (parse-form p)]
           (when (discard-sentinel? data)
             (errors/reader-error (str "Tagged literal #" tag " value was discarded by #_ — tagged literal requires a value")
-                               (error-data p (select-keys tok [:line :col]))))
+                                 (error-data p (select-keys tok [:line :col]))))
           (resolve/resolve-tagged-literal tag data (select-keys tok [:line :col]))))
 
       :namespaced-map-start
@@ -1833,7 +1830,7 @@
         (padvance! p)
         (when-not (tok-type? (ppeek p) :open-brace)
           (errors/reader-error (str "Expected { after " prefix)
-                             (error-data p (select-keys tok [:line :col]))))
+                               (error-data p (select-keys tok [:line :col]))))
         (let [m (parse-map p) ; parse the {map} directly, no maybe-call
               apply-ns (fn [k]
                          (if (and (keyword? k) (nil? (namespace k)))
@@ -1849,22 +1846,22 @@
           (let [body (parse-form p)
                 _ (when (discard-sentinel? body)
                     (errors/reader-error "#() body was discarded — #() requires a non-discarded expression"
-                                      (error-data p (select-keys tok [:line :col]))))
+                                         (error-data p (select-keys tok [:line :col]))))
                 nxt (ppeek p)]
             (cond
               (nil? nxt)
               (errors/reader-error "Unterminated #() — expected closing )"
-                                (error-data p (assoc (select-keys tok [:line :col]) :incomplete true)))
+                                   (error-data p (assoc (select-keys tok [:line :col]) :incomplete true)))
 
               (not (tok-type? nxt :close-paren))
               (errors/reader-error "#() body must be a single expression — use fn(args...) for multiple expressions"
-                                (error-data p (assoc (select-keys nxt [:line :col])
-                                                :secondary [{:line (:line tok) :col (:col tok) :label "#( opened here"}]))))
+                                   (error-data p (assoc (select-keys nxt [:line :col])
+                                                        :secondary [{:line (:line tok) :col (:col tok) :label "#( opened here"}]))))
             (padvance! p)
             (let [params (find-percent-params body)
                   _ (when (contains? params 0)
                       (errors/reader-error "%0 is not a valid parameter — use %1 or % for the first argument"
-                                         (error-data p (select-keys tok [:line :col]))))
+                                           (error-data p (select-keys tok [:line :col]))))
                   param-vec (build-anon-fn-params params)
                   body' (normalize-bare-percent body)]
               (with-meta (list 'fn param-vec body') {:sup/sugar true}))))
@@ -1878,7 +1875,7 @@
         (padvance! p)
         (when-not (tok-type? (ppeek p) :open-paren)
           (errors/reader-error (str "Expected ( after " prefix)
-                             (error-data p (select-keys tok [:line :col]))))
+                               (error-data p (select-keys tok [:line :col]))))
         (let [loc (select-keys (ppeek p) [:line :col])]
           (padvance! p) ; consume (
           (if (= :preserve (:read-cond (:opts p)))
@@ -1887,7 +1884,7 @@
 
       ;; default
       (errors/reader-error (str "Unexpected " (describe-token tok))
-                         (error-data p (select-keys tok [:line :col]))))))
+                           (error-data p (select-keys tok [:line :col]))))))
 
 (defn- metadatable?
   "Can this value carry Clojure metadata?"
@@ -1962,8 +1959,8 @@
     (try
       (when (> depth max-depth)
         (errors/reader-error (str "Maximum nesting depth (" max-depth ") exceeded — input is too deeply nested")
-                           (error-data p (merge {:depth depth} (when-let [tok (ppeek p)]
-                                                                 (select-keys tok [:line :col]))))))
+                             (error-data p (merge {:depth depth} (when-let [tok (ppeek p)]
+                                                                   (select-keys tok [:line :col]))))))
       (let [form  (parse-form-base p)
             form' (parse-call-chain p form)
             form' (attach-ws form' ws)]

@@ -9,10 +9,10 @@
   (first (core/sup->forms (core/forms->sup [form]))))
 
 #?(:clj
-(defn- clj-roundtrip
-  "Convert a Clojure source string through sup and back."
-  [clj-src]
-  (core/sup->clj (core/clj->sup clj-src))))
+   (defn- clj-roundtrip
+     "Convert a Clojure source string through sup and back."
+     [clj-src]
+     (core/sup->clj (core/clj->sup clj-src))))
 
 ;; ---------------------------------------------------------------------------
 ;; Atoms
@@ -176,17 +176,17 @@
 ;; ---------------------------------------------------------------------------
 
 #?(:clj
-(deftest test-clj-roundtrip-simple
-  (is (= "(+ 1 2)" (clj-roundtrip "(+ 1 2)")))
-  (is (= "(defn f [x] (+ x 1))"
-         (clj-roundtrip "(defn f [x] (+ x 1))")))
-  (is (= "(def x 42)" (clj-roundtrip "(def x 42)")))))
+   (deftest test-clj-roundtrip-simple
+     (is (= "(+ 1 2)" (clj-roundtrip "(+ 1 2)")))
+     (is (= "(defn f [x] (+ x 1))"
+            (clj-roundtrip "(defn f [x] (+ x 1))")))
+     (is (= "(def x 42)" (clj-roundtrip "(def x 42)")))))
 
 #?(:clj
-(deftest test-clj-roundtrip-reader-conditional
-  (let [src "#?(:clj 1 :cljs 2)"
-        result (clj-roundtrip src)]
-    (is (re-find #"#\?" result)))))
+   (deftest test-clj-roundtrip-reader-conditional
+     (let [src "#?(:clj 1 :cljs 2)"
+           result (clj-roundtrip src)]
+       (is (re-find #"#\?" result)))))
 
 ;; ---------------------------------------------------------------------------
 ;; sup->clj / clj->sup text-to-text
@@ -199,8 +199,8 @@
          (core/sup->clj "defn f [x]:\n  x + 1\nend"))))
 
 #?(:clj
-(deftest test-clj->sup
-  (is (= "1 + 2"
-         (core/clj->sup "(+ 1 2)")))
-  (is (= "defn f [x]:\n  x + 1\nend"
-         (core/clj->sup "(defn f [x] (+ x 1))")))))
+   (deftest test-clj->sup
+     (is (= "1 + 2"
+            (core/clj->sup "(+ 1 2)")))
+     (is (= "defn f [x]:\n  x + 1\nend"
+            (core/clj->sup "(defn f [x] (+ x 1))")))))

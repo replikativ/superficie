@@ -104,7 +104,7 @@
     (loop []
       (when (at-end? sc)
         (errors/reader-error "Unterminated string — missing closing \""
-                              (assoc start :incomplete true)))
+                             (assoc start :incomplete true)))
       (let [c (advance! sc)]
         (sb+ b c)
         (cond
@@ -139,7 +139,7 @@
   (advance! sc) ; consume backslash
   (when (at-end? sc)
     (errors/reader-error "Unterminated character literal — expected a character after \\"
-                          (assoc start :incomplete true)))
+                         (assoc start :incomplete true)))
   (let [b (sb+ (sb) \\)
         c (advance! sc)]
     (sb+ b c)
@@ -151,8 +151,8 @@
                   i))]
         (when (< n 4)
           (errors/reader-error
-            (str "Incomplete unicode escape: expected 4 hex digits after \\u, got " n)
-            (cond-> start (at-end? sc) (assoc :incomplete true)))))
+           (str "Incomplete unicode escape: expected 4 hex digits after \\u, got " n)
+           (cond-> start (at-end? sc) (assoc :incomplete true)))))
 
       (= c \o)   ; \oXXX octal
       (loop [i 0]
@@ -232,8 +232,8 @@
                                (recur))
                 (nil? c2)  (do (advance! sc)
                                (errors/reader-error
-                                 "Unexpected # at end of input — expected #{}, #\"\", #', #_, #?, or a tagged literal"
-                                 start))
+                                "Unexpected # at end of input — expected #{}, #\"\", #', #_, #?, or a tagged literal"
+                                start))
                 (sym-start? c2)
                 (do (advance! sc)
                     (conj! out (tok sc :tagged-literal (str "#" (scan-symbol sc)) start))
@@ -241,9 +241,9 @@
                 :else
                 (do (advance! sc)
                     (errors/reader-error
-                      (str "Invalid dispatch: #" c2
-                           " — # must be followed by {, \", ', _, ?, :, #, or a tag name")
-                      start))))
+                     (str "Invalid dispatch: #" c2
+                          " — # must be followed by {, \", ', _, ?, :, #, or a tag name")
+                     start))))
 
             (= c \@)  (do (advance! sc) (conj! out (tok sc :deref "@" start)) (recur))
             (= c \^)  (do (advance! sc) (conj! out (tok sc :meta "^" start)) (recur))
@@ -251,8 +251,8 @@
             (= c \`)  (do (advance! sc)
                           (when (at-end? sc)
                             (errors/reader-error
-                              "Unexpected end of input after ` — expected a form to syntax-quote"
-                              (assoc start :incomplete true)))
+                             "Unexpected end of input after ` — expected a form to syntax-quote"
+                             (assoc start :incomplete true)))
                           (conj! out (tok sc :syntax-quote "`" start))
                           (recur))
             (= c \~)  (do (advance! sc)

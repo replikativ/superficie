@@ -18,7 +18,7 @@
         n   (- end idx 1)]
     (when (< n 4)
       (errors/reader-error
-        (str "Invalid unicode escape — expected 4 hex digits after \\u, got " n) loc))
+       (str "Invalid unicode escape — expected 4 hex digits after \\u, got " n) loc))
     (let [hex  (subs raw (inc idx) end)
           code (try #?(:clj  (Integer/parseInt hex 16)
                        :cljs (let [v (js/parseInt hex 16)]
@@ -64,8 +64,8 @@
 
                       :else
                       (errors/reader-error
-                        (str "Unsupported escape sequence \\" e " in string")
-                        loc))))))))]
+                       (str "Unsupported escape sequence \\" e " in string")
+                       loc))))))))]
     (if @has-esc?
       (forms/->SupRaw result raw)
       result)))
@@ -105,7 +105,7 @@
                  code (try (Integer/parseInt oct 8)
                            (catch Exception _
                              (errors/reader-error
-                               (str "Invalid octal character \\" body) loc)))]
+                              (str "Invalid octal character \\" body) loc)))]
              (when (> code 0377)
                (errors/reader-error (str "Octal character out of range: \\" body) loc))
              (forms/->SupRaw (char code) raw))])
@@ -136,7 +136,7 @@
            ;; BigInt N suffix
            (str/ends-with? raw "N")
            (clojure.lang.BigInt/fromBigInteger
-             (java.math.BigInteger. (subs raw 0 (dec (count raw)))))
+            (java.math.BigInteger. (subs raw 0 (dec (count raw)))))
 
            ;; Ratio  3/4
            (str/includes? raw "/")
@@ -196,8 +196,8 @@
       (if (instance? #?(:clj clojure.lang.ExceptionInfo :cljs ExceptionInfo) ex)
         (throw ex)
         (errors/reader-error
-          (str "Invalid number " raw " — " (#?(:clj ex-message :cljs .-message) ex))
-          (assoc loc :cause ex))))))
+         (str "Invalid number " raw " — " (#?(:clj ex-message :cljs .-message) ex))
+         (assoc loc :cause ex))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Regex
@@ -211,8 +211,8 @@
             :cljs (js/RegExp. pattern))
          (catch #?(:clj Exception :cljs :default) ex
            (errors/reader-error
-             (str "Invalid regex " raw " — " (#?(:clj ex-message :cljs .-message) ex))
-             (assoc loc :cause ex))))))
+            (str "Invalid regex " raw " — " (#?(:clj ex-message :cljs .-message) ex))
+            (assoc loc :cause ex))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Auto-resolve keywords  ::foo
@@ -226,13 +226,13 @@
     (try (resolve-fn raw)
          (catch #?(:clj Exception :cljs :default) ex
            (errors/reader-error
-             (str "Failed to resolve keyword " raw " — "
-                  (#?(:clj ex-message :cljs .-message) ex))
-             (assoc loc :cause ex))))
+            (str "Failed to resolve keyword " raw " — "
+                 (#?(:clj ex-message :cljs .-message) ex))
+            (assoc loc :cause ex))))
     #?(:clj  (forms/deferred-auto-keyword raw)
        :cljs (errors/reader-error
-               (str "Auto-resolve keywords (" raw ") require :resolve-keyword in opts")
-               (assoc loc :hint "Pass :resolve-keyword (fn [kw] ...) in the opts map")))))
+              (str "Auto-resolve keywords (" raw ") require :resolve-keyword in opts")
+              (assoc loc :hint "Pass :resolve-keyword (fn [kw] ...) in the opts map")))))
 
 ;; ---------------------------------------------------------------------------
 ;; Tagged literals
@@ -243,5 +243,5 @@
   [tag data loc]
   #?(:clj  (tagged-literal tag data)
      :cljs (errors/reader-error
-             (str "Tagged literals (#" tag ") are not supported in the ClojureScript reader")
-             loc)))
+            (str "Tagged literals (#" tag ") are not supported in the ClojureScript reader")
+            loc)))

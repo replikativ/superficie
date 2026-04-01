@@ -174,10 +174,10 @@
                  (cond
                    (sq-vec? form)
                    (forms/->SupSyntaxQuote
-                     (vec (map sq-concat-elem (concat-args (second form)))))
+                    (vec (map sq-concat-elem (concat-args (second form)))))
                    (sq-list? form)
                    (forms/->SupSyntaxQuote
-                     (apply list (map sq-concat-elem (concat-args form))))
+                    (apply list (map sq-concat-elem (concat-args form))))
                    (sq-empty-list? form)
                    (forms/->SupSyntaxQuote '())
                    (seq? form)
@@ -191,7 +191,7 @@
                    cljs-reader/*default-data-reader-fn* tagged-literal]
            (loop [forms []]
              (let [form (cljs-reader/read
-                          {:read-cond :preserve :eof eof-sentinel} rdr)]
+                         {:read-cond :preserve :eof eof-sentinel} rdr)]
                (if (identical? form eof-sentinel)
                  (mapv denorm forms)
                  (recur (conj forms form))))))))))

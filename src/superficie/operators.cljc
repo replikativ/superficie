@@ -20,26 +20,26 @@
   "Global atom: qualified-sym → operator entry.
    Consulted by the Pratt climber and printer. Thread-safe via swap!."
   (atom
-    {;; Arithmetic
-     'clojure.core/+    {:prec 40 :assoc :left  :kind :infix :variadic true}
-     'clojure.core/-    {:prec 40 :assoc :left  :kind :infix}
-     'clojure.core/*    {:prec 50 :assoc :left  :kind :infix :variadic true}
-     'clojure.core//    {:prec 50 :assoc :left  :kind :infix}
-     'clojure.core/mod  {:prec 50 :assoc :left  :kind :infix}
-     'clojure.core/rem  {:prec 50 :assoc :left  :kind :infix}
+   {;; Arithmetic
+    'clojure.core/+    {:prec 40 :assoc :left  :kind :infix :variadic true}
+    'clojure.core/-    {:prec 40 :assoc :left  :kind :infix}
+    'clojure.core/*    {:prec 50 :assoc :left  :kind :infix :variadic true}
+    'clojure.core//    {:prec 50 :assoc :left  :kind :infix}
+    'clojure.core/mod  {:prec 50 :assoc :left  :kind :infix}
+    'clojure.core/rem  {:prec 50 :assoc :left  :kind :infix}
      ;; Logic
-     'clojure.core/and  {:prec 20 :assoc :left  :kind :infix :variadic true}
-     'clojure.core/or   {:prec 10 :assoc :left  :kind :infix :variadic true}
+    'clojure.core/and  {:prec 20 :assoc :left  :kind :infix :variadic true}
+    'clojure.core/or   {:prec 10 :assoc :left  :kind :infix :variadic true}
      ;; Comparison
-     'clojure.core/=    {:prec 30 :assoc :left  :kind :infix :comparison true}
-     'clojure.core/not= {:prec 30 :assoc :left  :kind :infix :comparison true}
-     'clojure.core/<    {:prec 30 :assoc :left  :kind :infix :comparison true}
-     'clojure.core/>    {:prec 30 :assoc :left  :kind :infix :comparison true}
-     'clojure.core/<=   {:prec 30 :assoc :left  :kind :infix :comparison true}
-     'clojure.core/>=   {:prec 30 :assoc :left  :kind :infix :comparison true}
+    'clojure.core/=    {:prec 30 :assoc :left  :kind :infix :comparison true}
+    'clojure.core/not= {:prec 30 :assoc :left  :kind :infix :comparison true}
+    'clojure.core/<    {:prec 30 :assoc :left  :kind :infix :comparison true}
+    'clojure.core/>    {:prec 30 :assoc :left  :kind :infix :comparison true}
+    'clojure.core/<=   {:prec 30 :assoc :left  :kind :infix :comparison true}
+    'clojure.core/>=   {:prec 30 :assoc :left  :kind :infix :comparison true}
      ;; Threading — :str because (name '->>)="->>" ≠ surface "|>"
-     'clojure.core/->>  {:prec 5  :assoc :left  :kind :infix :variadic true :str "|>"}
-     'clojure.core/->   {:prec 5  :assoc :left  :kind :infix :variadic true :str ".>"}}))
+    'clojure.core/->>  {:prec 5  :assoc :left  :kind :infix :variadic true :str "|>"}
+    'clojure.core/->   {:prec 5  :assoc :left  :kind :infix :variadic true :str ".>"}}))
 
 ;; ---------------------------------------------------------------------------
 ;; Secondary index: surface-string → qualified-sym
@@ -136,7 +136,7 @@
 (def ^{:superficie/op {:prec 55 :assoc :right :kind :infix}
        :doc "Exponentiation — (a ** b) = (Math/pow a b). Like ** in Python/Julia."}
   **  #?(:clj  (fn [base exp] (Math/pow (double base) (double exp)))
-          :cljs (fn [base exp] (js/Math.pow base exp))))
+         :cljs (fn [base exp] (js/Math.pow base exp))))
 
 (def ^{:superficie/op {:prec 60 :assoc :right :kind :infix}
        :doc "Left-to-right function composition — (f >> g) = (comp g f).

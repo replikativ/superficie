@@ -18,7 +18,6 @@
 
 (def ^:dynamic *mode* :sup)
 
-
 ;; ---------------------------------------------------------------------------
 ;; Print helpers
 ;; ---------------------------------------------------------------------------
@@ -741,13 +740,13 @@
                  "("
                  (str/join " "
                            (map-indexed
-                             (fn [i arg]
-                               (if (and (> i 0) (< i (dec n))
-                                        (symbol? arg)
-                                        (contains? @ops/*surface-index* (name arg)))
-                                 (qualify-if-operator arg)
-                                 (print-form arg)))
-                             args))
+                            (fn [i arg]
+                              (if (and (> i 0) (< i (dec n))
+                                       (symbol? arg)
+                                       (contains? @ops/*surface-index* (name arg)))
+                                (qualify-if-operator arg)
+                                (print-form arg)))
+                            args))
                  ")")))))
 
     ;; syntax-quote / unquote / unquote-splicing AST nodes
@@ -795,9 +794,9 @@
     (map? form)
     (if-let [ns-str (:sup/ns (meta form))]
       (let [strip-ns (fn [k]
-                        (if (and (keyword? k) (= (namespace k) (if (str/starts-with? ns-str ":") (subs ns-str 1) ns-str)))
-                          (keyword (name k))
-                          k))
+                       (if (and (keyword? k) (= (namespace k) (if (str/starts-with? ns-str ":") (subs ns-str 1) ns-str)))
+                         (keyword (name k))
+                         k))
             body (str/join ", " (map (fn [[k v]] (str (print-form (strip-ns k)) " " (print-form v))) form))]
         (str "#:" ns-str "{" body "}"))
       (let [entries (vec form)
@@ -805,17 +804,17 @@
         (str "{"
              (str/join ", "
                        (map-indexed
-                         (fn [i [k v]]
-                           (str (print-form k) " "
+                        (fn [i [k v]]
+                          (str (print-form k) " "
                                 ;; Qualify operator-symbol values in non-last entry positions:
                                 ;; {k / k2 v2} → {k clojure.core// k2 v2} avoids infix parse.
-                                (if (and (< i (dec n))
-                                         (= *mode* :sup)
-                                         (symbol? v)
-                                         (contains? @ops/*surface-index* (name v)))
-                                  (qualify-if-operator v)
-                                  (print-form v))))
-                         entries))
+                               (if (and (< i (dec n))
+                                        (= *mode* :sup)
+                                        (symbol? v)
+                                        (contains? @ops/*surface-index* (name v)))
+                                 (qualify-if-operator v)
+                                 (print-form v))))
+                        entries))
              "}")))
 
     ;; set — use :sup/order for insertion-order output when available
