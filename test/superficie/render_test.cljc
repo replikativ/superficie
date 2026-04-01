@@ -79,8 +79,8 @@
            (p/print-form '(defprotocol Resizable (resize [this factor] [this w h])))))))
 
 (deftest test-defrecord
-  (is (= "defrecord Point [x y]:\n  Drawable\n  draw [this]:\n    \"pt\"\n  end\n  area [this]:\n    0.0\n  end\nend"
-         (p/print-form '(defrecord Point [x y] Drawable (draw [this] "pt") (area [this] 0.0))))))
+  (is (= "defrecord Point [x y]:\n  Drawable\n  draw [this]:\n    \"pt\"\n  end\n  area [this]:\n    0\n  end\nend"
+         (p/print-form '(defrecord Point [x y] Drawable (draw [this] "pt") (area [this] 0))))))
 
 (deftest test-reify
   (is (= "reify:\n  Runnable\n  run [this]:\n    println(\"hi\")\n  end\nend"
