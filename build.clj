@@ -8,7 +8,7 @@
 (def org "replikativ")
 (def lib 'org.replikativ/superficie)
 (def current-commit (b/git-process {:git-args "rev-parse HEAD"}))
-(def version (format "0.1.%s" (b/git-count-revs nil)))
+(def version (format "0.2.%s" (b/git-count-revs nil)))
 (def class-dir "target/classes")
 (def basis (b/create-basis {:project "deps.edn"}))
 (def jar-file (format "target/%s-%s.jar" (name lib) version))
@@ -95,3 +95,13 @@
               :version version
               :jar-file jar-file
               :class-dir class-dir}))
+
+(defn npm-version
+  "Write the git-derived version into package.json."
+  [_]
+  (let [pkg (slurp "package.json")
+        updated (clojure.string/replace pkg
+                  #"\"version\"\s*:\s*\"[^\"]+\""
+                  (str "\"version\": \"" version "\""))]
+    (spit "package.json" updated)
+    (println (str "package.json version set to " version))))

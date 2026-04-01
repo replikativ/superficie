@@ -1,12 +1,13 @@
 {
   "name": "superficie",
-  "version": "0.1.0",
+  "version": "0.1.17",
   "description": "Surface syntax for Clojure — bidirectional renderer between S-expressions and readable syntax",
   "main": "dist/superficie.js",
   "files": [
     "dist/superficie.js",
     "dist/superficie.hljs.js",
-    "dist/browser/superficie.js"
+    "dist/browser/superficie.js",
+    "dist/browser-repl/superficie-repl.js"
   ],
   "keywords": [
     "clojure",

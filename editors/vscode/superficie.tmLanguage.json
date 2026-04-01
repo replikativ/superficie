@@ -89,11 +89,11 @@
       "name": "keyword.control.superficie"
     },
     "def-keyword": {
-      "match": "\\b(e/defn|defn-|defn|defmacro|defonce|def|ns)\\b",
+      "match": "\\b(e/defn|defn-|defn|defmacro|defonce|def|defmulti|defmethod|defprotocol|defrecord|deftype|ns)\\b",
       "name": "keyword.other.definition.superficie"
     },
     "operator-keyword": {
-      "match": "\\b(and|or|not|mod|rem|in|new|throw|recur)\\b",
+      "match": "\\b(and|or|not|mod|rem|in|new|throw|recur|reify|proxy)\\b",
       "name": "keyword.operator.superficie"
     },
     "special-form": {

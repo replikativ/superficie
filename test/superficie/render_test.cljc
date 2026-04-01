@@ -1,174 +1,193 @@
 (ns superficie.render-test
+  "Tests for superficie.core/forms->sup and superficie.emit.printer/print-form."
   (:require [clojure.test :refer [deftest is testing]]
             [clojure.string :as str]
-            [superficie.render :as render]))
+            [superficie.core :as core]
+            [superficie.emit.printer :as p]))
+
+;; ---------------------------------------------------------------------------
+;; Atoms
+;; ---------------------------------------------------------------------------
 
 (deftest test-atoms
-  (let [ctx {:refers {} :aliases {} :excludes #{}}]
-    (is (= "42" (render/render-form ctx 42)))
-    (is (= "\"hello\"" (render/render-form ctx "hello")))
-    (is (= ":foo" (render/render-form ctx :foo)))
-    (is (= "nil" (render/render-form ctx nil)))
-    (is (= "true" (render/render-form ctx true)))
-    (is (= "my-sym" (render/render-form ctx 'my-sym)))))
+  (is (= "42"        (p/print-form 42)))
+  (is (= "3.14"      (p/print-form 3.14)))
+  (is (= "\"hello\"" (p/print-form "hello")))
+  (is (= ":foo"      (p/print-form :foo)))
+  (is (= ":foo/bar"  (p/print-form :foo/bar)))
+  (is (= "nil"       (p/print-form nil)))
+  (is (= "true"      (p/print-form true)))
+  (is (= "false"     (p/print-form false)))
+  (is (= "my-sym"    (p/print-form 'my-sym))))
+
+;; ---------------------------------------------------------------------------
+;; Collections
+;; ---------------------------------------------------------------------------
 
 (deftest test-collections
-  (let [ctx {:refers {} :aliases {} :excludes #{}}]
-    (is (= "[1, 2, 3]" (render/render-form ctx [1 2 3])))
-    (is (= "{:a 1, :b 2}" (render/render-form ctx {:a 1 :b 2})))
-    (is (= "#{}" (render/render-form ctx #{})))))
+  (is (= "[1 2 3]"           (p/print-form [1 2 3])))
+  (is (= "{:a 1}"            (p/print-form {:a 1})))
+  (is (str/starts-with?      (p/print-form #{1 2 3}) "#{"))
+  (is (= "[]"                (p/print-form [])))
+  (is (= "{}"                (p/print-form {}))))
+
+;; ---------------------------------------------------------------------------
+;; Infix operators
+;; ---------------------------------------------------------------------------
 
 (deftest test-infix
-  (let [ctx {:refers {} :aliases {} :excludes #{}}]
-    (is (= "1 + 2" (render/render-form ctx '(+ 1 2))))
-    (is (= "1 + 2 + 3" (render/render-form ctx '(+ 1 2 3))))
-    (is (= "a * b" (render/render-form ctx '(* a b))))
-    (is (= "x > 0" (render/render-form ctx '(> x 0))))
-    (is (= "-x" (render/render-form ctx '(- x))))))
+  (is (= "1 + 2"       (p/print-form '(+ 1 2))))
+  (is (= "1 + 2 + 3"   (p/print-form '(+ 1 2 3))))
+  (is (= "a * b"       (p/print-form '(* a b))))
+  (is (= "x > 0"       (p/print-form '(> x 0))))
+  (is (= "a and b"     (p/print-form '(and a b))))
+  (is (= "a or b"      (p/print-form '(or a b)))))
+
+;; ---------------------------------------------------------------------------
+;; Calls
+;; ---------------------------------------------------------------------------
 
 (deftest test-function-call
-  (let [ctx {:refers {} :aliases {} :excludes #{}}]
-    (is (= "println(\"hello\", \"world\")"
-           (render/render-form ctx '(println "hello" "world"))))
-    (is (= "map(inc, [1, 2, 3])"
-           (render/render-form ctx '(map inc [1 2 3]))))))
+  (is (= "println(\"hello\" \"world\")" (p/print-form '(println "hello" "world"))))
+  (is (= "map(inc [1 2 3])"             (p/print-form '(map inc [1 2 3]))))
+  (is (= "f()"                          (p/print-form '(f)))))
+
+;; ---------------------------------------------------------------------------
+;; Blocks
+;; ---------------------------------------------------------------------------
+
+(deftest test-def
+  (is (= "def x: 42"    (p/print-form '(def x 42))))
+  (is (= "defonce y: 0" (p/print-form '(defonce y 0))))
+  (is (= "defmulti area: :shape" (p/print-form '(defmulti area :shape))))
+  (testing "defmulti complex form falls back to call syntax"
+    (is (= "defmulti(foo :dispatch :default :other)"
+           (p/print-form '(defmulti foo :dispatch :default :other))))))
+
+(deftest test-defmethod
+  (is (= "defmethod area :circle [shape]:\n  Math/PI\nend"
+         (p/print-form '(defmethod area :circle [shape] Math/PI)))))
+
+(deftest test-defprotocol
+  (is (= "defprotocol Drawable:\n  draw [this]\n  area [this]\nend"
+         (p/print-form '(defprotocol Drawable (draw [this]) (area [this])))))
+  (testing "with docstring"
+    (is (= "defprotocol Shape \"A shape\":\n  area [this]\nend"
+           (p/print-form '(defprotocol Shape "A shape" (area [this]))))))
+  (testing "multi-arity method signature"
+    (is (= "defprotocol Resizable:\n  resize [this factor] [this w h]\nend"
+           (p/print-form '(defprotocol Resizable (resize [this factor] [this w h])))))))
+
+(deftest test-defrecord
+  (is (= "defrecord Point [x y]:\n  Drawable\n  draw [this]:\n    \"pt\"\n  end\n  area [this]:\n    0.0\n  end\nend"
+         (p/print-form '(defrecord Point [x y] Drawable (draw [this] "pt") (area [this] 0.0))))))
+
+(deftest test-reify
+  (is (= "reify:\n  Runnable\n  run [this]:\n    println(\"hi\")\n  end\nend"
+         (p/print-form '(reify Runnable (run [this] (println "hi")))))))
+
+(deftest test-proxy
+  (is (= "proxy [java.io.InputStream] []:\n  read []:\n    -1\n  end\nend"
+         (p/print-form '(proxy [java.io.InputStream] [] (read [] -1))))))
 
 (deftest test-defn
-  (is (= "defn greet(name):\n  println(name)\nend"
-         (render/render-form
-          {:refers {} :aliases {} :excludes #{}}
-          '(defn greet [name] (println name))))))
+  (is (= "defn greet [name]:\n  str(\"Hello\" name)\nend"
+         (p/print-form '(defn greet [name] (str "Hello" name)))))
+  (testing "with docstring"
+    (is (= "defn greet \"Greets a person\" [name]:\n  println(name)\nend"
+           (p/print-form '(defn greet "Greets a person" [name] (println name)))))))
+
+(deftest test-fn
+  (is (= "fn [x]:\n  x + 1\nend"
+         (p/print-form '(fn [x] (+ x 1))))))
 
 (deftest test-if
-  (let [ctx {:refers {} :aliases {} :excludes #{}}]
-    (is (= "if x > 0:\n  \"positive\"\nelse:\n  \"negative\"\nend"
-           (render/render-form ctx '(if (> x 0) "positive" "negative"))))))
+  (is (= "if x > 0 :\n  \"pos\"\nelse:\n  \"neg\"\nend"
+         (p/print-form '(if (> x 0) "pos" "neg"))))
+  (testing "without else"
+    (is (= "if x > 0 :\n  \"pos\"\nend"
+           (p/print-form '(if (> x 0) "pos"))))))
 
 (deftest test-let
-  (let [ctx {:refers {} :aliases {} :excludes #{}}]
-    (is (= "let x := 1, y := 2:\n  x + y\nend"
-           (render/render-form ctx '(let [x 1 y 2] (+ x y)))))))
+  (is (= "let [x 1]:\n  x + 2\nend"
+         (p/print-form '(let [x 1] (+ x 2))))))
+
+(deftest test-when
+  (is (= "when x > 0 :\n  println(\"pos\")\nend"
+         (p/print-form '(when (> x 0) (println "pos"))))))
+
+(deftest test-case
+  (is (= "case x :\n  1 => \"one\"\n  2 => \"two\"\n  => \"default\"\nend"
+         (p/print-form '(case x 1 "one" 2 "two" "default")))))
+
+(deftest test-try
+  (is (= "try:\n  risky()\ncatch [Exception e]:\n  handle(e)\nend"
+         (p/print-form '(try (risky) (catch Exception e (handle e)))))))
+
+;; ---------------------------------------------------------------------------
+;; Threading
+;; ---------------------------------------------------------------------------
 
 (deftest test-threading
-  (let [ctx {:refers {} :aliases {} :excludes #{}}]
-    (is (= "data\n  |> filter(even?)\n  |> map(inc)"
-           (render/render-form ctx '(->> data (filter even?) (map inc)))))))
+  (is (= "accounts |> filter(:active) |> map(:balance) |> reduce(+)"
+         (p/print-form '(->> accounts (filter :active) (map :balance) (reduce +)))))
+  (is (= "account .> update(:balance *(1.05))"
+         (p/print-form '(-> account (update :balance (* 1.05)))))))
+
+;; ---------------------------------------------------------------------------
+;; Interop
+;; ---------------------------------------------------------------------------
 
 (deftest test-interop
-  (let [ctx {:refers {} :aliases {} :excludes #{}}]
-    (is (= "s.toLowerCase()"
-           (render/render-form ctx '(.toLowerCase s))))
-    (is (= "Math/pow(2, 10)"
-           (render/render-form ctx '(Math/pow 2 10))))))
+  (is (= "\"hello\".toUpperCase()"     (p/print-form '(.toUpperCase "hello"))))
+  (is (= "\"hello\".replace(\"l\" \"r\")" (p/print-form '(.replace "hello" "l" "r"))))
+  (is (= "point.-x"                    (p/print-form '(.-x point))))
+  (is (= "Math/abs(-1)"               (p/print-form '(Math/abs -1))))
+  (is (= "new java.util.Date()"       (p/print-form '(java.util.Date.))))
+  (is (= "new StringBuilder(\"init\")" (p/print-form '(StringBuilder. "init")))))
 
-(deftest test-ns-resolution
-  (testing "excluded core forms are not rewritten"
-    (let [ctx {:refers {} :aliases {} :excludes #{'+ '-}}]
-      ;; + is excluded from core, so render as regular call
-      (is (= "+(1, 2)" (render/render-form ctx '(+ 1 2)))))))
+;; ---------------------------------------------------------------------------
+;; Reader macros (with sugar metadata)
+;; ---------------------------------------------------------------------------
 
-(deftest test-precedence-parens
-  (let [ctx {:refers {} :aliases {} :excludes #{}}]
-    (testing "lower-precedence sub-expr gets parens"
-      (is (= "(a + b) * c" (render/render-form ctx '(* (+ a b) c))))
-      (is (= "a * (b + c)" (render/render-form ctx '(* a (+ b c)))))
-      (is (= "(a + b) * (c - d)" (render/render-form ctx '(* (+ a b) (- c d))))))
-    (testing "same or higher precedence — no parens needed"
-      (is (= "a * b + c" (render/render-form ctx '(+ (* a b) c))))
-      (is (= "a + b * c" (render/render-form ctx '(+ a (* b c))))))
-    (testing "comparison with arithmetic"
-      (is (= "a + b > c" (render/render-form ctx '(> (+ a b) c))))
-      (is (= "a > b + c" (render/render-form ctx '(> a (+ b c))))))
-    (testing "logical with comparison"
-      (is (= "a > 0 and b > 0" (render/render-form ctx '(and (> a 0) (> b 0)))))
-      (is (= "(a or b) and c" (render/render-form ctx '(and (or a b) c)))))
-    (testing "not with lower-precedence arg wraps in parens"
-      (is (= "not (a or b)" (render/render-form ctx '(not (or a b))))))
-    (testing "deeply nested"
-      (is (= "(a + b) * (c + d)" (render/render-form ctx '(* (+ a b) (+ c d))))))))
+(deftest test-reader-macros
+  (testing "deref with sugar"
+    (is (= "@state" (p/print-form (with-meta '(clojure.core/deref state) {:sup/sugar true})))))
+  (testing "quote with sugar"
+    (is (= "'foo"   (p/print-form (with-meta '(quote foo) {:sup/sugar true})))))
+  (testing "var with sugar"
+    (is (= "#'foo"  (p/print-form (with-meta '(var foo) {:sup/sugar true}))))))
 
-(deftest test-full-render
-  (let [source "(ns myapp.core
-  (:require [clojure.string :as str]))
+;; ---------------------------------------------------------------------------
+;; Metadata
+;; ---------------------------------------------------------------------------
 
-(defn greet [name]
-  (str \"Hello, \" name))
+(deftest test-metadata
+  (is (= "^:private x"    (p/print-form (with-meta 'x {:private true}))))
+  (is (= "^String x"      (p/print-form (with-meta 'x {:tag 'String}))))
+  (is (= "^:dynamic *x*"  (p/print-form (with-meta '*x* {:dynamic true})))))
 
-(defn process [data]
-  (->> data
-       (filter even?)
-       (map inc)
-       (reduce +)))"]
-    (is (string? (render/render-string source)))))
+;; ---------------------------------------------------------------------------
+;; clj->sup and forms->sup via core API
+;; ---------------------------------------------------------------------------
 
-(deftest test-discard-forms
-  (testing "#_ top-level forms are skipped"
-    (is (not (str/includes? (render/render-string "#_ (def unused 0)\n(def x 42)")
-                            "unused")))
-    (is (str/includes? (render/render-string "#_ (def unused 0)\n(def x 42)")
-                       "def x := 42"))
-    (is (not (str/includes? (render/render-string "(def x 1)\n\n#_(def skip 99)\n\n(def y 2)")
-                            "skip"))))
-  (testing "#_ only form produces empty output"
-    (is (= "" (render/render-string "#_(foo bar)")))))
+(deftest test-clj->sup
+  (is (= "defn f [x]:\n  x + 1\nend"
+         (core/clj->sup "(defn f [x] (+ x 1))")))
+  (testing "multiple forms"
+    (let [result (core/clj->sup "(def a 1)\n(def b 2)")]
+      (is (str/includes? result "def a: 1"))
+      (is (str/includes? result "def b: 2")))))
 
-(deftest test-render-string-multiple-forms
-  (testing "multiple top-level forms"
-    (let [result (render/render-string "(def a 1)\n\n(def b 2)\n\n(defn f [x] x)")]
-      (is (str/includes? result "def a := 1"))
-      (is (str/includes? result "def b := 2"))
-      (is (str/includes? result "defn f(x):")))))
+(deftest test-forms->sup
+  (is (= "def x: 42\n\nprintln(x)"
+         (core/forms->sup ['(def x 42) '(println x)]))))
 
-(deftest test-reader-conditionals
-  (testing "top-level #? preserved verbatim"
-    (is (= "#?(:clj (def x 1) :cljs (def x 2))"
-           (render/render-string "#?(:clj (def x 1) :cljs (def x 2))"))))
-  (testing "form containing #? renders as superficie with exact raw island"
-    (let [result (render/render-string "(defn foo [s]\n  #?(:clj (Integer/parseInt s)\n     :cljs (js/parseInt s 10)))")]
-      (is (str/includes? result "defn foo(s):"))
-      (is (str/includes? result "#?(:clj"))
-      (is (str/includes? result ":cljs"))
-      (is (not (str/includes? result "read-string")))
-      (is (not (str/starts-with? result "(defn foo")))))
-  (testing "pure forms alongside #? still render as superficie"
-    (let [result (render/render-string "(defn pure [x] (inc x))\n\n(defn mixed [s]\n  #?(:clj (.toUpperCase s)\n     :cljs (.toUpperCase s)))")]
-      (is (str/includes? result "defn pure(x):"))
-      (is (str/includes? result "defn mixed(s):"))
-      (is (str/includes? result "#?(:clj"))))
-  (testing "tagged literals stay literal inside ordinary rendered forms"
-    (let [result (render/render-string "(def data {:created-at #inst \"2020-01-01\"})")]
-      (is (str/includes? result "def data :="))
-      (is (str/includes? result "#inst \"2020-01-01\""))))
-  (testing "comment forms stay literal without collapsing the parent form"
-    (let [result (render/render-string "(defn f [x] (comment x) x)")]
-      (is (str/includes? result "defn f(x):"))
-      (is (str/includes? result "(comment x)"))
-      (is (not (str/starts-with? result "(defn f"))))))
+;; ---------------------------------------------------------------------------
+;; Reader conditionals
+;; ---------------------------------------------------------------------------
 
-;; let-flattening: tail lets rendered as statements, not blocks
-(deftest test-let-flattening
-  (let [ctx {:refers {} :aliases {} :excludes #{}}]
-    (testing "tail let in defn is flattened"
-      (let [result (render/render-form ctx '(defn foo [x] (let [y 1] (+ x y))))]
-        (is (str/includes? result "let y := 1"))
-        (is (not (str/includes? result "end\nend")))
-        (is (not (str/includes? result "let y := 1:")))))
-    (testing "nested tail lets are merged"
-      (let [result (render/render-form ctx '(defn foo [x] (let [a 1] (let [b 2] (+ a b)))))]
-        (is (str/includes? result "let a := 1"))
-        (is (str/includes? result "let b := 2"))
-        (is (not (str/includes? result "let a := 1:")))))
-    (testing "non-tail let keeps block syntax"
-      (let [result (render/render-form ctx '(defn foo [x] (let [y 1] (use y)) (other)))]
-        (is (str/includes? result "let y := 1:"))
-        (is (str/includes? result "end\n  other()"))))
-    (testing "let in if-else branches is flattened"
-      (let [result (render/render-form ctx '(if true (let [x 1] x) (let [y 2] y)))]
-        (is (str/includes? result "let x := 1"))
-        (is (not (str/includes? result "let x := 1:")))
-        (is (str/includes? result "let y := 2"))
-        (is (not (str/includes? result "let y := 2:")))))
-    (testing "binding/with-open are not flattened"
-      (let [result (render/render-form ctx '(defn foo [] (binding [*x* 1] (bar))))]
-        (is (str/includes? result "binding *x* := 1:"))
-        (is (str/includes? result "end\nend"))))))
+#?(:clj
+(deftest test-reader-conditional-in-output
+  (let [result (core/clj->sup "#?(:clj (def x 1) :cljs (def x 2))")]
+    (is (re-find #"#\?" result)))))

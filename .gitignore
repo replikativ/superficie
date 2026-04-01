@@ -7,3 +7,4 @@ target/
 .shadow-cljs/
 out/
 node_modules/
+dist/

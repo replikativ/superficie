@@ -1,17 +1,11 @@
 (ns superficie.browser
-  "Browser entry point — exposes renderString and parseString on
-   the global `superficie` object for use in <script> tags."
-  (:require [clojure.string :as str]
-            [superficie.render :as render]
-            [superficie.parse :as parse]))
-
-(defn render-string [source]
-  (render/render-string source))
-
-(defn parse-string [source]
-  (parse/emit-source (parse/parse-string source)))
+  "Browser entry point — exposes the superficie API on the global
+   `superficie` object for use in <script> tags."
+  (:require [superficie.core :as core]))
 
 ;; Expose on globalThis.superficie
 (set! (.-superficie js/globalThis)
-      #js {:renderString render-string
-           :parseString  parse-string})
+      #js {:renderString  core/clj->sup
+           :parseString   core/sup->clj
+           :toSup         core/clj->sup
+           :toClj         core/sup->clj})

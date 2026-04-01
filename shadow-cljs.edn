@@ -14,7 +14,10 @@
   {:target    :node-library
    :output-to "dist/superficie.js"
    :exports   {:renderString  superficie.api/renderString
-               :parseString   superficie.api/parseString}
+               :parseString   superficie.api/parseString
+               :toSup         superficie.api/toSup
+               :toClj         superficie.api/toClj
+               :supToForms    superficie.api/supToForms}
    :compiler-options {:infer-externs true
                       :optimizations :advanced}}
 
@@ -22,5 +25,12 @@
   {:target    :browser
    :output-dir "dist/browser"
    :modules   {:superficie {:entries [superficie.browser]}}
+   :compiler-options {:infer-externs true
+                      :optimizations :advanced}}
+
+  :browser-repl
+  {:target    :browser
+   :output-dir "dist/browser-repl"
+   :modules   {:superficie-repl {:entries [superficie.sci-repl]}}
    :compiler-options {:infer-externs true
                       :optimizations :advanced}}}}

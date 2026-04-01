@@ -1,243 +1,283 @@
 (ns superficie.parse-test
+  "Tests for superficie.core/sup->forms — parsing .sup syntax to Clojure forms."
   (:require [clojure.test :refer [deftest is testing]]
-            [superficie.parse :as parse]
-            [superficie.opaque :as opaque]))
+            [superficie.core :as core]))
+
+(defn- parse1
+  "Parse a single-form sup string, return the form."
+  [s]
+  (first (core/sup->forms s)))
+
+;; ---------------------------------------------------------------------------
+;; Atoms
+;; ---------------------------------------------------------------------------
 
 (deftest test-atoms
   (testing "numbers"
-    (is (= 42 (parse/parse-string "42")))
-    (is (= 3.14 (parse/parse-string "3.14")))
-    (is (= -1 (parse/parse-string "-1")))
-    (is (= 0xFF (parse/parse-string "0xFF"))))
+    (is (= 42    (parse1 "42")))
+    (is (= 3.14  (parse1 "3.14")))
+    (is (= -1    (parse1 "-1"))))
   (testing "strings"
-    (is (= "hello" (parse/parse-string "\"hello\""))))
+    (is (= "hello" (parse1 "\"hello\""))))
   (testing "keywords"
-    (is (= :foo (parse/parse-string ":foo")))
-    (is (= :foo/bar (parse/parse-string ":foo/bar"))))
+    (is (= :foo     (parse1 ":foo")))
+    (is (= :foo/bar (parse1 ":foo/bar"))))
   (testing "symbols"
-    (is (= 'my-func (parse/parse-string "my-func")))
-    (is (= 'even? (parse/parse-string "even?")))
-    (is (= 'foo/bar (parse/parse-string "foo/bar")))
-    (is (= '+ (parse/parse-string "+")))
-    (is (= 'str (parse/parse-string "str"))))
+    (is (= 'my-func (parse1 "my-func")))
+    (is (= 'even?   (parse1 "even?")))
+    (is (= 'foo/bar (parse1 "foo/bar")))
+    (is (= '+       (parse1 "+"))))
   (testing "nil and booleans"
-    (is (nil? (parse/parse-string "nil")))
-    (is (= true (parse/parse-string "true")))
-    (is (= false (parse/parse-string "false")))))
+    (is (nil?      (parse1 "nil")))
+    (is (= true    (parse1 "true")))
+    (is (= false   (parse1 "false")))))
+
+;; ---------------------------------------------------------------------------
+;; Collections
+;; ---------------------------------------------------------------------------
 
 (deftest test-collections
-  (is (= [1 2 3] (parse/parse-string "[1, 2, 3]")))
-  (is (= {:a 1 :b 2} (parse/parse-string "{:a 1, :b 2}")))
-  (is (= #{1 2 3} (parse/parse-string "#{1, 2, 3}")))
-  (is (= [] (parse/parse-string "[]")))
-  (is (= {} (parse/parse-string "{}"))))
+  (is (= [1 2 3]        (parse1 "[1 2 3]")))
+  (is (= [1 2 3]        (parse1 "[1, 2, 3]")))   ; commas as whitespace
+  (is (= {:a 1 :b 2}   (parse1 "{:a 1 :b 2}")))
+  (is (= #{1 2 3}       (parse1 "#{1 2 3}")))
+  (is (= []             (parse1 "[]")))
+  (is (= {}             (parse1 "{}"))))
+
+;; ---------------------------------------------------------------------------
+;; Infix operators
+;; ---------------------------------------------------------------------------
 
 (deftest test-infix-arithmetic
   (testing "basic"
-    (is (= '(+ 1 2) (parse/parse-string "1 + 2")))
-    (is (= '(- a b) (parse/parse-string "a - b")))
-    (is (= '(* x y) (parse/parse-string "x * y"))))
-  (testing "precedence: * binds tighter than +"
-    (is (= '(+ (* a b) c) (parse/parse-string "a * b + c")))
-    (is (= '(+ a (* b c)) (parse/parse-string "a + b * c"))))
+    (is (= '(+ 1 2)   (parse1 "1 + 2")))
+    (is (= '(- a b)   (parse1 "a - b")))
+    (is (= '(* x y)   (parse1 "x * y"))))
+  (testing "precedence: * tighter than +"
+    (is (= '(+ (* a b) c) (parse1 "a * b + c")))
+    (is (= '(+ a (* b c)) (parse1 "a + b * c"))))
   (testing "comparison"
-    (is (= '(> x 0) (parse/parse-string "x > 0")))
-    (is (= '(<= a b) (parse/parse-string "a <= b"))))
+    (is (= '(> x 0)   (parse1 "x > 0")))
+    (is (= '(<= a b)  (parse1 "a <= b"))))
   (testing "logical"
-    (is (= '(and a b) (parse/parse-string "a and b")))
-    (is (= '(or a b) (parse/parse-string "a or b")))))
+    (is (= '(and a b) (parse1 "a and b")))
+    (is (= '(or a b)  (parse1 "a or b")))))
 
-(deftest test-unary
-  (is (= '(not x) (parse/parse-string "not x")))
-  (is (= '(- x) (parse/parse-string "-x")))
-  (is (= '(deref atom) (parse/parse-string "@atom")))
-  (is (= '(throw ex) (parse/parse-string "throw ex"))))
+;; ---------------------------------------------------------------------------
+;; Calls
+;; ---------------------------------------------------------------------------
 
 (deftest test-function-call
-  (is (= '(println "hello") (parse/parse-string "println(\"hello\")")))
-  (is (= '(map inc [1 2 3]) (parse/parse-string "map(inc, [1, 2, 3])")))
-  (is (= '(f) (parse/parse-string "f()"))))
+  (is (= '(println "hello") (parse1 "println(\"hello\")")))
+  (is (= '(map inc [1 2 3]) (parse1 "map(inc [1 2 3])")))
+  (is (= '(map inc [1 2 3]) (parse1 "map(inc, [1, 2, 3])"))) ; commas ok
+  (is (= '(f)               (parse1 "f()"))))
 
-(deftest test-method-call
-  (is (= '(.toLowerCase s) (parse/parse-string "s.toLowerCase()")))
-  (is (= '(.getBytes s "UTF-8") (parse/parse-string "s.getBytes(\"UTF-8\")"))))
+;; ---------------------------------------------------------------------------
+;; Interop
+;; ---------------------------------------------------------------------------
+
+(deftest test-interop
+  (testing "method call postfix"
+    (is (= '(.toLowerCase s)          (parse1 "s.toLowerCase()")))
+    (is (= '(.getBytes s "UTF-8")     (parse1 "s.getBytes(\"UTF-8\")")))
+    (is (= '(.toUpperCase (.trim s))  (parse1 "s.trim().toUpperCase()"))))
+  (testing "field access"
+    (is (= '(.-x point) (parse1 "point.-x"))))
+  (testing "constructor"
+    (is (= '(HashMap.)         (parse1 "new HashMap()")))
+    (is (= '(StringBuilder. "x") (parse1 "new StringBuilder(\"x\")"))))
+  (testing "static"
+    (is (= '(Math/abs -1)  (parse1 "Math/abs(-1)")))
+    (is (= 'Math/PI        (parse1 "Math/PI")))))
+
+;; ---------------------------------------------------------------------------
+;; Block forms
+;; ---------------------------------------------------------------------------
 
 (deftest test-def
-  (is (= '(def x 42) (parse/parse-string "def x := 42")))
-  (is (= '(def max-retries 3) (parse/parse-string "def max-retries := 3"))))
+  (is (= '(def x 42)          (parse1 "def x: 42")))
+  (is (= '(def max-retries 3) (parse1 "def max-retries: 3")))
+  ;; call syntax still works as a fallback
+  (is (= '(def x 42)          (parse1 "def(x 42)"))))
 
 (deftest test-defn
   (is (= '(defn greet [name] (println name))
-         (parse/parse-string
-          "defn greet(name):
-             println(name)
-           end")))
+         (parse1 "defn greet [name]:\n  println(name)\nend")))
   (is (= '(defn add [a b] (+ a b))
-         (parse/parse-string
-          "defn add(a, b):
-             a + b
-           end"))))
+         (parse1 "defn add [a b]:\n  a + b\nend"))))
+
+(deftest test-defn-docstring
+  (is (= '(defn greet "Greets someone" [name] (println name))
+         (parse1 "defn greet \"Greets someone\" [name]:\n  println(name)\nend"))))
 
 (deftest test-if
   (is (= '(if (> x 0) "positive" "negative")
-         (parse/parse-string
-          "if x > 0:
-             \"positive\"
-           else:
-             \"negative\"
-           end")))
+         (parse1 "if x > 0 :\n  \"positive\"\nelse:\n  \"negative\"\nend")))
   (testing "if without else"
     (is (= '(if (> x 0) "positive")
-           (parse/parse-string
-            "if x > 0:
-               \"positive\"
-             end")))))
+           (parse1 "if x > 0 :\n  \"positive\"\nend")))))
 
 (deftest test-let
   (is (= '(let [x 1 y 2] (+ x y))
-         (parse/parse-string
-          "let x := 1, y := 2:
-             x + y
-           end"))))
+         (parse1 "let [x 1 y 2]:\n  x + y\nend"))))
+
+(deftest test-when
+  (is (= '(when (> x 0) (println "pos"))
+         (parse1 "when x > 0 :\n  println(\"pos\")\nend"))))
+
+(deftest test-fn
+  (is (= '(fn [x] (+ x 1))
+         (parse1 "fn [x]:\n  x + 1\nend"))))
 
 (deftest test-cond
   (is (= '(cond (< x 0) :negative (= x 0) :zero :else :positive)
-         (parse/parse-string
-          "cond:
-             x < 0 => :negative
-             x = 0 => :zero
-             :else => :positive
-           end"))))
+         (parse1 "cond:\n  x < 0 => :negative\n  x = 0 => :zero\n  :else => :positive\nend"))))
 
-(deftest test-threading
-  (is (= '(->> data (filter even?) (map inc))
-         (parse/parse-string
-          "data
-             |> filter(even?)
-             |> map(inc)"))))
+(deftest test-case
+  (is (= '(case x 1 "one" 2 "two" "default")
+         (parse1 "case x :\n  1 => \"one\"\n  2 => \"two\"\n  => \"default\"\nend"))))
+
+(deftest test-for
+  (is (= '(for [x xs y ys] [x y])
+         (parse1 "for [x xs y ys]:\n  [x y]\nend")))
+  (is (= '(for [x xs :when (> x 0)] x)
+         (parse1 "for [x xs :when x > 0]:\n  x\nend"))))
 
 (deftest test-try
   (is (= '(try (println "hi") (catch Exception e (println e)))
-         (parse/parse-string
-          "try:
-             println(\"hi\")
-           catch Exception e:
-             println(e)
-           end"))))
+         (parse1 "try:\n  println(\"hi\")\ncatch [Exception e]:\n  println(e)\nend"))))
 
-(deftest test-anon-fn
-  (is (= '(fn [x] (+ x 1))
-         (parse/parse-string
-          "fn(x):
-             x + 1
-           end"))))
+(deftest test-threading
+  (is (= '(->> data (filter even?) (map inc))
+         (parse1 "data |> filter(even?) |> map(inc)")))
+  (is (= '(-> account (update :balance (* 1.05)))
+         (parse1 "account .> update(:balance *(1.05))"))))
 
-(deftest test-do
-  (is (= '(do (println "a") (println "b"))
-         (parse/parse-string
-          "do:
-             println(\"a\")
-             println(\"b\")
-           end"))))
+;; ---------------------------------------------------------------------------
+;; Metadata and reader macros
+;; ---------------------------------------------------------------------------
 
 (deftest test-metadata
-  (testing "keyword metadata on symbol"
-    (let [r (parse/parse-string "^:private x")]
+  (testing "keyword metadata"
+    (let [r (parse1 "^:private x")]
       (is (= 'x r))
       (is (= true (:private (meta r))))))
-  (testing "type hint metadata"
-    (let [r (parse/parse-string "^String x")]
+  (testing "type hint"
+    (let [r (parse1 "^String x")]
       (is (= 'x r))
       (is (= 'String (:tag (meta r))))))
   (testing "map metadata"
-    (let [r (parse/parse-string "^{:doc \"hello\"} x")]
-      (is (= 'x r))
-      (is (= "hello" (:doc (meta r))))))
-  (testing "metadata in def"
-    (let [r (parse/parse-string "def ^:private x := 42")]
-      (is (= 'def (first r)))
-      (is (= true (:private (meta (second r)))))))
-  (testing "metadata in defn"
-    (let [r (parse/parse-string "defn ^:private foo(x):\n  x\nend")]
-      (is (= 'defn (first r)))
-      (is (= true (:private (meta (second r))))))))
+    (let [r (parse1 "^{:doc \"hello\"} x")]
+      (is (= "hello" (:doc (meta r)))))))
 
-(deftest test-defmacro
-  (is (= '(defmacro unless [pred & body] pred)
-         (parse/parse-string
-          "defmacro unless(pred, & body):
-             pred
-           end"))))
+(deftest test-quote-deref-var
+  (is (= '(quote foo)          (parse1 "'foo")))
+  (is (= '(clojure.core/deref state) (parse1 "@state")))
+  (is (= '(var foo)            (parse1 "#'foo"))))
 
-(deftest test-condp
-  (is (= '(condp = x 1 :one 2 :two :other)
-         (parse/parse-string
-          "condp = x:
-             1 => :one
-             2 => :two
-             else => :other
-           end"))))
+;; ---------------------------------------------------------------------------
+;; Reader conditionals and tagged literals
+;; ---------------------------------------------------------------------------
 
-(deftest test-multi-arity-defn
-  (is (= '(defn greet ([] (greet "World")) ([name] (str "Hello, " name)))
-         (parse/parse-string
-          "defn greet
-             ():
-               greet(\"World\")
-             (name):
-               str(\"Hello, \", name)
-           end"))))
+#?(:clj
+(deftest test-reader-conditional
+  (testing "reader conditional preserved with :read-cond :preserve"
+    (let [forms (core/sup->forms "#?(:clj 1 :cljs 2)" {:read-cond :preserve})]
+      (is (= 1 (count forms)))
+      (is (reader-conditional? (first forms)))))
+  (testing "reader conditional evaluated for current platform"
+    (let [forms (core/sup->forms "#?(:clj :jvm :cljs :js)")]
+      (is (= 1 (count forms)))
+      (is (= :jvm (first forms)))))))
 
-(deftest test-broad-symbols
-  (testing "namespace-qualified symbols"
-    (is (= 'foo/bar (parse/parse-string "foo/bar")))
-    (is (= 'str/blank? (parse/parse-string "str/blank?"))))
+#?(:clj
+(deftest test-tagged-literal
+  (let [forms (core/sup->forms "#inst \"2024-01-01\"")]
+    (is (= 1 (count forms))))))
+
+;; ---------------------------------------------------------------------------
+;; Symbols
+;; ---------------------------------------------------------------------------
+
+(deftest test-symbols
   (testing "dotted Java class names"
-    (is (= 'java.util.HashMap (parse/parse-string "java.util.HashMap"))))
-  (testing "dotted namespace-qualified symbols"
+    (is (= 'java.util.HashMap (parse1 "java.util.HashMap"))))
+  (testing "namespace-qualified"
     (is (= 'java.util.UUID/nameUUIDFromBytes
-           (parse/parse-string "java.util.UUID/nameUUIDFromBytes")))
-    (is (= 'clojure.core.async/<!!
-           (parse/parse-string "clojure.core.async/<!!"))))
-  (testing "symbols with special chars"
-    (is (= 'int96->epoch-millis (parse/parse-string "int96->epoch-millis")))
-    (is (= 'some->> (parse/parse-string "some->>")))
-    (is (= 'cond-> (parse/parse-string "cond->")))
-    (is (= 'as-> (parse/parse-string "as->")))
-    (is (= 'a/<! (parse/parse-string "a/<!"))))
+           (parse1 "java.util.UUID/nameUUIDFromBytes"))))
+  (testing "special chars"
+    (is (= 'int96->epoch-millis (parse1 "int96->epoch-millis")))
+    (is (= 'some->>             (parse1 "some->>")))
+    (is (= '<!!                 (parse1 "<!!"))))
   (testing "operator symbols as values"
-    (is (= '+ (parse/parse-string "+")))
-    (is (= '-> (parse/parse-string "->")))
-    (is (= '->> (parse/parse-string "->>")))
-    (is (= '>= (parse/parse-string ">="))))
-  (testing "core.async operator symbols"
-    (is (= '<! (parse/parse-string "<!")))
-    (is (= '>! (parse/parse-string ">!")))
-    (is (= '<!! (parse/parse-string "<!!")))
-    (is (= '>!! (parse/parse-string ">!!")))))
+    (is (= '-> (parse1 "->")))
+    (is (= '>= (parse1 ">=")))))
 
-(deftest test-opaque-forms
-  (testing "top-level opaque reader forms parse as preserved islands"
-    (let [conditional (parse/parse-string "#?(:clj 1 :cljs 2)")
-          tagged (parse/parse-string "#inst \"2020-01-01\"")
-          syntax-quoted (parse/parse-string "`(foo ~bar ~@baz)")]
-      (is (opaque/opaque-form? conditional))
-      (is (= "#?(:clj 1 :cljs 2)" (parse/emit-form conditional)))
-      (is (opaque/opaque-form? tagged))
-      (is (= "#inst \"2020-01-01\"" (parse/emit-form tagged)))
-      (is (opaque/opaque-form? syntax-quoted))
-      (is (= "`(foo ~bar ~@baz)" (parse/emit-form syntax-quoted)))))
-  (testing "opaque forms can live inside ordinary surface blocks"
-    (is (= "(defn f [x] #?(:clj x :cljs x))"
-           (parse/emit-source
-            (parse/parse-string
-             "defn f(x):\n  #?(:clj x :cljs x)\nend"))))
-    (is (= "(def x #inst \"2020-01-01\")"
-           (parse/emit-source
-            (parse/parse-string
-             "def x := #inst \"2020-01-01\"")))))
-  (testing "comment forms can be preserved as raw islands in bodies"
-    (is (= "(defn f [x] (comment x) x)"
-           (parse/emit-source
-            (parse/parse-string
-             "defn f(x):\n  (comment x)\n  x\nend"))))))
+;; ---------------------------------------------------------------------------
+;; defmulti / defmethod
+;; ---------------------------------------------------------------------------
+
+(deftest test-defmulti
+  (is (= '(defmulti area :shape)
+         (parse1 "defmulti area: :shape")))
+  (is (= '(defmulti process-event :type)
+         (parse1 "defmulti process-event: :type"))))
+
+(deftest test-defmethod
+  (is (= '(defmethod area :circle [shape] Math/PI)
+         (parse1 "defmethod area :circle [shape]:\n  Math/PI\nend")))
+  (is (= '(defmethod area :default [shape] 0)
+         (parse1 "defmethod area :default [shape]:\n  0\nend"))))
+
+;; ---------------------------------------------------------------------------
+;; defprotocol
+;; ---------------------------------------------------------------------------
+
+(deftest test-defprotocol
+  (is (= '(defprotocol Drawable (draw [this]) (area [this]))
+         (parse1 "defprotocol Drawable:\n  draw [this]\n  area [this]\nend")))
+  (testing "with docstring on protocol"
+    (is (= '(defprotocol Shape "A geometric shape" (area [this]))
+           (parse1 "defprotocol Shape \"A geometric shape\":\n  area [this]\nend"))))
+  (testing "multi-arity method signature"
+    (is (= '(defprotocol Resizable (resize [this factor] [this w h]))
+           (parse1 "defprotocol Resizable:\n  resize [this factor] [this w h]\nend"))))
+  (testing "method with docstring"
+    (is (= '(defprotocol P (f [this] "doc"))
+           (parse1 "defprotocol P:\n  f [this] \"doc\"\nend")))))
+
+;; ---------------------------------------------------------------------------
+;; defrecord / deftype
+;; ---------------------------------------------------------------------------
+
+(deftest test-defrecord
+  (is (= '(defrecord Point [x y] Drawable (draw [this] "pt") (area [this] 0.0))
+         (parse1 "defrecord Point [x y]:\n  Drawable\n  draw [this]:\n    \"pt\"\n  end\n  area [this]:\n    0.0\n  end\nend")))
+  (testing "no interfaces"
+    (is (= '(defrecord Empty [])
+           (parse1 "defrecord Empty []:\nend")))))
+
+(deftest test-deftype
+  (is (= '(deftype MyType [x] MyProto (doIt [this] x))
+         (parse1 "deftype MyType [x]:\n  MyProto\n  doIt [this]:\n    x\n  end\nend"))))
+
+;; ---------------------------------------------------------------------------
+;; reify / proxy
+;; ---------------------------------------------------------------------------
+
+(deftest test-reify
+  (is (= '(reify Runnable (run [this] (println "hi")))
+         (parse1 "reify:\n  Runnable\n  run [this]:\n    println(\"hi\")\n  end\nend"))))
+
+(deftest test-proxy
+  (is (= '(proxy [java.io.InputStream] [] (read [] -1))
+         (parse1 "proxy [java.io.InputStream] []:\n  read []:\n    -1\n  end\nend"))))
+
+;; ---------------------------------------------------------------------------
+;; Multiple forms
+;; ---------------------------------------------------------------------------
+
+(deftest test-multiple-forms
+  (is (= ['(def x 42) '(println x)]
+         (core/sup->forms "def x: 42\nprintln(x)"))))

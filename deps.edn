@@ -1,15 +1,15 @@
 {:paths ["src" "resources"]
 
  :deps {org.clojure/clojure {:mvn/version "1.12.0"}
-        rewrite-clj/rewrite-clj {:mvn/version "1.2.52"}
-        instaparse/instaparse {:mvn/version "1.5.0"}
-        org.clojure/tools.cli {:mvn/version "1.1.230"}}
+        org.clojure/tools.cli {:mvn/version "1.1.230"}
+        org.clojure/tools.reader {:mvn/version "1.5.2"}}
 
  :aliases
  {;; Development
   :dev {:extra-paths ["test" "dev"]
         :extra-deps {org.clojure/test.check {:mvn/version "1.1.1"}
-                     nrepl/nrepl {:mvn/version "1.3.0"}}}
+                     nrepl/nrepl {:mvn/version "1.3.0"}
+                     org.clojure/core.match {:mvn/version "1.0.1"}}}
 
   ;; Run tests
   :test {:extra-paths ["test"]
@@ -27,10 +27,15 @@
   ;; ClojureScript (for shadow-cljs)
   :cljs {:extra-paths ["test"]
          :extra-deps {org.clojure/clojurescript {:mvn/version "1.11.132"}
-                      thheller/shadow-cljs {:mvn/version "2.26.0"}}}
+                      thheller/shadow-cljs {:mvn/version "2.26.0"}
+                      org.babashka/sci {:mvn/version "0.11.50"}
+                      org.clojure/core.match {:mvn/version "1.0.1"}}}
 
   ;; Run CLI
   :run {:main-opts ["-m" "superficie.main"]}
+
+  ;; Interactive REPL
+  :repl {:main-opts ["-m" "superficie.repl"]}
 
   ;; Build and deploy
   :build {:deps {io.github.clojure/tools.build {:mvn/version "0.10.6"}

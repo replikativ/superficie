@@ -90,6 +90,31 @@
   </div>
 </div>
 
+<div class="repl-section" style="margin-bottom:2.5rem;">
+  <h2 style="margin-bottom:0.75rem;font-size:1.1rem;">REPL <span id="repl-status" style="font-size:0.75rem;font-weight:400;color:#586069;">(loading…)</span></h2>
+  <div style="display:flex;gap:0;border:1px solid #e1e4e8;border-radius:8px;overflow:hidden;background:#fff;flex-direction:column;">
+    <div style="display:flex;gap:0;flex:1;">
+      <div style="flex:1;min-width:0;display:flex;flex-direction:column;">
+        <div style="padding:0.25rem 1rem;background:#f6f8fa;border-bottom:1px solid #e1e4e8;border-right:1px solid #e1e4e8;font-size:0.75rem;font-weight:600;color:#586069;text-transform:uppercase;letter-spacing:0.05em;display:flex;align-items:center;justify-content:space-between;">
+          <span>Superficie input</span>
+          <button id="repl-reset" style="font-size:0.75rem;font-family:inherit;border:1px solid #d1d5da;border-radius:4px;padding:0.1rem 0.5rem;background:#fff;color:#586069;cursor:pointer;" title="Clear all definitions">Reset</button>
+        </div>
+        <textarea id="repl-input" spellcheck="false"
+          style="width:100%;min-height:140px;border:none;border-right:1px solid #e1e4e8;outline:none;resize:vertical;padding:1rem;font-family:'JetBrains Mono','Fira Code','SF Mono',Menlo,monospace;font-size:0.875rem;line-height:1.5;background:#fff;color:#24292e;tab-size:2;"
+          placeholder="def x: 42&#10;println(x)"></textarea>
+        <div style="padding:0.4rem 1rem;border-top:1px solid #e1e4e8;border-right:1px solid #e1e4e8;background:#fafbfc;display:flex;gap:0.5rem;">
+          <button id="repl-run" style="padding:0.3rem 0.9rem;background:#0366d6;color:#fff;border:none;border-radius:4px;font-size:0.85rem;font-family:inherit;cursor:pointer;">Run</button>
+          <span style="font-size:0.75rem;color:#999;line-height:2;">Ctrl+Enter</span>
+        </div>
+      </div>
+      <div style="flex:1;min-width:0;display:flex;flex-direction:column;">
+        <div style="padding:0.25rem 1rem;background:#f6f8fa;border-bottom:1px solid #e1e4e8;font-size:0.75rem;font-weight:600;color:#586069;text-transform:uppercase;letter-spacing:0.05em;">Output</div>
+        <div id="repl-output" style="flex:1;padding:1rem;min-height:140px;font-family:'JetBrains Mono','Fira Code','SF Mono',Menlo,monospace;font-size:0.875rem;line-height:1.5;overflow-x:auto;white-space:pre-wrap;color:#24292e;"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div class="controls">
   <label for="mode-toggle">Side by side</label>
   <input type="checkbox" id="mode-toggle" class="toggle" checked>
@@ -98,8 +123,10 @@
 <div id="examples"></div>
 
 <!-- Superficie: browser bundle (renders Clojure → Superficie live) + highlight.js plugin -->
-<script src="../dist/browser/superficie.js"></script>
-<script src="../dist/superficie.hljs.js"></script>
+<script src="https://unpkg.com/superficie@latest/dist/browser/superficie.js"></script>
+<script src="https://unpkg.com/superficie@latest/dist/superficie.hljs.js"></script>
+<!-- Superficie: SCI REPL bundle (evaluates superficie source) -->
+<script src="https://unpkg.com/superficie@latest/dist/browser-repl/superficie-repl.js"></script>
 <script>
 
 // Only Clojure source needed — superficie is rendered automatically
@@ -199,6 +226,60 @@ const examples = [
         new (swap! state f)]
     (println (quote swapped) old '-> new)
     #'swap-and-log))`
+  },
+  {
+    title: "defmulti and defmethod",
+    clojure: `(defmulti area :shape)
+
+(defmethod area :circle [s]
+  (* Math/PI (:radius s) (:radius s)))
+
+(defmethod area :rect [s]
+  (* (:width s) (:height s)))
+
+(defmethod area :default [s]
+  (throw (ex-info "Unknown shape" {:shape (:shape s)})))`
+  },
+  {
+    title: "defprotocol",
+    clojure: `(defprotocol Drawable
+  "Something that can be drawn."
+  (draw [this ctx])
+  (bounding-box [this])
+  (translate [this dx dy]))`
+  },
+  {
+    title: "defrecord with protocol implementation",
+    clojure: `(defrecord Circle [cx cy r]
+  Drawable
+  (draw [this ctx]
+    (.arc ctx cx cy r 0 (* 2 Math/PI)))
+  (bounding-box [this]
+    {:x (- cx r) :y (- cy r) :w (* 2 r) :h (* 2 r)})
+  (translate [this dx dy]
+    (->Circle (+ cx dx) (+ cy dy) r)))`
+  },
+  {
+    title: "reify",
+    clojure: `(defn make-counter []
+  (let [n (atom 0)]
+    (reify
+      clojure.lang.IDeref
+      (deref [_] @n)
+      java.lang.Runnable
+      (run [_] (swap! n inc)))))`
+  },
+  {
+    title: "proxy",
+    clojure: `(defn make-logging-stream [delegate]
+  (proxy [java.io.InputStream] []
+    (read []
+      (let [b (.read delegate)]
+        (println "read byte:" b)
+        b))
+    (close []
+      (println "closing")
+      (.close delegate))))`
   },
   {
     title: "Comments",
@@ -363,6 +444,69 @@ snippetSelect.addEventListener('change', function() {
 // Load first example on page load
 tryInput.value = examples[0].clojure;
 updateOutput();
+
+// --- SCI REPL ---
+var replInput  = document.getElementById('repl-input');
+var replOutput = document.getElementById('repl-output');
+var replStatus = document.getElementById('repl-status');
+var replRun    = document.getElementById('repl-run');
+var replReset  = document.getElementById('repl-reset');
+
+function replReady() {
+  return typeof superficieRepl !== 'undefined';
+}
+
+function setReplStatus() {
+  if (replReady()) {
+    replStatus.textContent = '(SCI ready)';
+    replStatus.style.color = '#28a745';
+    replRun.disabled = false;
+  } else {
+    replStatus.textContent = '(REPL bundle not loaded)';
+    replStatus.style.color = '#cb2431';
+    replRun.disabled = true;
+  }
+}
+
+function escapeHtmlRepl(s) {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function runRepl() {
+  if (!replReady()) return;
+  var src = replInput.value.trim();
+  if (!src) return;
+  var res = superficieRepl.evalSup(src);
+  var html = '';
+  if (res.output) html += '<span style="color:#24292e">' + escapeHtmlRepl(res.output) + '</span>';
+  if (res.error)  html += '<span style="color:#cb2431">' + escapeHtmlRepl(res.error) + '</span>';
+  else            html += '<span style="color:#005cc5">=> ' + escapeHtmlRepl(res.result) + '</span>';
+  replOutput.innerHTML += (replOutput.innerHTML ? '\n' : '') + html;
+  replOutput.scrollTop = replOutput.scrollHeight;
+}
+
+replRun.addEventListener('click', runRepl);
+
+replInput.addEventListener('keydown', function(e) {
+  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+    e.preventDefault();
+    runRepl();
+  }
+  if (e.key === 'Tab') {
+    e.preventDefault();
+    var s = this.selectionStart, end = this.selectionEnd;
+    this.value = this.value.substring(0, s) + '  ' + this.value.substring(end);
+    this.selectionStart = this.selectionEnd = s + 2;
+  }
+});
+
+replReset.addEventListener('click', function() {
+  if (replReady()) { superficieRepl.reset(); }
+  replOutput.innerHTML = '';
+  replOutput.innerHTML = '<span style="color:#586069;font-style:italic">Context reset.</span>';
+});
+
+setReplStatus();
 </script>
 </body>
 </html>

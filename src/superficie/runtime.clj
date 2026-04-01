@@ -219,26 +219,44 @@
 
    ;; Def forms
    'clojure.core/def      :def-form
-   'clojure.core/defonce   :def-form
-   'clojure.core/defn      :defn-form
-   'clojure.core/defn-     :defn-form
-   'clojure.core/defmacro  :defn-form
+   'clojure.core/defonce  :def-form
+   'clojure.core/defmulti :def-form
+   'clojure.core/defn     :defn-form
+   'clojure.core/defn-    :defn-form
+   'clojure.core/defmacro :defn-form
+
+   ;; Protocol/record/type/reify/proxy forms
+   'clojure.core/defmethod   :defmethod-form
+   'clojure.core/defprotocol :defprotocol-form
+   'clojure.core/defrecord   :defrecord-form
+   'clojure.core/deftype     :defrecord-form
+   'clojure.core/reify       :reify-form
+   'clojure.core/proxy       :proxy-form
 
    ;; Unary / special
    'clojure.core/not    :not-form
    'clojure.core/deref  :deref-form
-   'clojure.core/ns     :ns-form})
+   'clojure.core/ns     :ns-form
+
+   ;; Known third-party macros with defined block roles
+   'clojure.core.match/match :match-form})
+
+(defn resolve-role-for-var
+  "Resolve the rendering role for a var object directly.
+   Checks :superficie/role metadata first, then core-role-overrides by
+   fully-qualified symbol. Returns a role keyword or nil."
+  [v]
+  (when (var? v)
+    (let [m    (meta v)
+          qsym (symbol (str (ns-name (:ns m))) (str (:name m)))]
+      (or (:superficie/role m)
+          (get core-role-overrides qsym)))))
 
 (defn resolve-role
-  "Resolve the rendering role for a symbol in context.
+  "Resolve the rendering role for a qualified symbol.
    Checks: core overrides -> Layer 2 (var :superficie/role metadata) -> fallback.
-   Heuristic classification (Layer 1) is NOT used for custom macros because
-   their argument structure may differ from standard forms.
    Returns a role keyword or nil."
   [qualified-sym]
-  (or
-   ;; Check core overrides first (Layer 0 + known core)
-   (get core-role-overrides qualified-sym)
-   ;; Layer 2: explicit :superficie/role metadata on var (opt-in by library authors)
-   (when-let [v (try (resolve qualified-sym) (catch Exception _ nil))]
-     (:superficie/role (meta v)))))
+  (or (get core-role-overrides qualified-sym)
+      (when-let [v (try (resolve qualified-sym) (catch Exception _ nil))]
+        (:superficie/role (meta v)))))

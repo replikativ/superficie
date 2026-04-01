@@ -1,0 +1,7 @@
+{:paths ["src"]
+ :tasks
+ {:requires ([superficie.repl :as repl])
+
+  sup
+  {:doc  "Start an interactive superficie REPL (uses Babashka's built-in SCI eval)"
+   :task (repl/start)}}}

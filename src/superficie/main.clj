@@ -1,15 +1,14 @@
 (ns superficie.main
   "CLI entry point for superficie."
-  (:require [superficie.render :as render]
-            [superficie.parse :as parse]
-            [superficie.runtime :as rt]
+  (:require [superficie.core :as core]
+            [superficie.eval :as sup-eval]
             [clojure.tools.cli :as cli])
   (:gen-class))
 
 (def cli-options
-  [["-h" "--help" "Show help"]
+  [["-h" "--help"        "Show help"]
    ["-o" "--output FILE" "Output file (default: stdout)"]
-   [nil  "--runtime" "Use runtime classpath for symbol resolution"]])
+   [nil  "--eval"        "Eval forms while converting (enables macro-aware block detection)"]])
 
 (defn- read-stdin []
   (let [sb (StringBuilder.)]
@@ -19,18 +18,6 @@
           (str sb)
           (do (.append sb (char ch))
               (recur)))))))
-
-(defn- render-source
-  "Render Clojure source to superficie syntax."
-  [source opts]
-  (let [render-opts (when (:runtime opts)
-                      {:runtime-roles rt/core-role-overrides})]
-    (render/render-string source render-opts)))
-
-(defn- parse-source
-  "Parse superficie source to Clojure S-expressions."
-  [source]
-  (parse/emit-source (parse/parse-string source)))
 
 (defn -main [& args]
   (let [{:keys [options arguments summary errors]} (cli/parse-opts args cli-options)]
@@ -45,8 +32,8 @@
           (println "Usage: superficie [options] <command> [file]")
           (println)
           (println "Commands:")
-          (println "  render [file.clj]   Convert Clojure to superficie syntax")
-          (println "  parse  [file.sup]   Convert superficie syntax to Clojure")
+          (println "  to-sup [file.clj]   Convert Clojure to superficie syntax")
+          (println "  to-clj [file.sup]   Convert superficie syntax to Clojure")
           (println)
           (println "If no file is given, reads from stdin.")
           (println)
@@ -54,15 +41,11 @@
           (println summary)
           (println)
           (println "Examples:")
-          (println "  superficie render src/foo.clj")
-          (println "  superficie render src/foo.clj -o foo.sup")
-          (println "  echo '(defn f [x] (+ x 1))' | superficie render")
-          (println "  superficie parse foo.sup")
-          (println)
-          (println "Classpath:")
-          (println "  Without --runtime, renders using clojure.core roles only.")
-          (println "  With --runtime, uses the current classpath for symbol resolution.")
-          (println "  To render with project deps: clj -Sdeps '{:deps {io.github.user/superficie {:git/tag ...}}}' -M -m superficie.main --runtime render file.clj"))
+          (println "  superficie to-sup src/foo.clj")
+          (println "  superficie to-sup src/foo.clj -o foo.sup")
+          (println "  echo '(defn f [x] (+ x 1))' | superficie to-sup")
+          (println "  superficie to-clj foo.sup")
+          (println "  superficie to-clj foo.sup --eval   # macro-aware"))
 
       (empty? arguments)
       (do (binding [*out* *err*] (println "superficie: no command given. Try --help"))
@@ -70,17 +53,30 @@
 
       :else
       (let [[command file & _] arguments
-            source (if file (slurp file) (read-stdin))
+            source    (if file (slurp file) (read-stdin))
             output-fn (fn [s]
                         (if-let [out (:output options)]
                           (spit out s)
                           (print s)))]
         (case command
-          "render"
-          (output-fn (render-source source options))
+          "to-sup"
+          (if (:eval options)
+            (let [sw (java.io.StringWriter.)]
+              (sup-eval/eval-clj-string source {:sup-output sw})
+              (output-fn (str sw)))
+            (output-fn (core/clj->sup source)))
 
-          "parse"
-          (output-fn (parse-source source))
+          "to-clj"
+          (if (:eval options)
+            (let [sw (java.io.StringWriter.)]
+              (sup-eval/eval-string source {:clj-output sw})
+              (output-fn (str sw)))
+            (output-fn (core/sup->clj source)))
 
-          (do (binding [*out* *err*] (println (str "superficie: unknown command '" command "'")))
+          ;; Legacy aliases
+          "render" (output-fn (core/clj->sup source))
+          "parse"  (output-fn (core/sup->clj source))
+
+          (do (binding [*out* *err*]
+                (println (str "superficie: unknown command '" command "'. Try --help")))
               (System/exit 1)))))))

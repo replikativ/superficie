@@ -1,18 +1,22 @@
 (ns superficie.api
-  "Public JS API for the superficie npm package.
-   Exposes renderString and parseString as plain JS functions."
-  (:require [clojure.string :as str]
-            [superficie.render :as render]
-            [superficie.parse :as parse]))
+  "Public JS API for the superficie npm package."
+  (:require [superficie.core :as core]))
 
-(defn ^:export renderString
-  "Convert a Clojure source string to superficie syntax.
-   Returns a string."
+(defn ^:export toSup
+  "Convert a Clojure source string to superficie syntax. Returns a string."
   [source]
-  (render/render-string source))
+  (core/clj->sup source))
 
-(defn ^:export parseString
-  "Convert a superficie source string back to Clojure S-expressions.
-   Returns a string of Clojure code."
+(defn ^:export toClj
+  "Convert a superficie source string to Clojure source. Returns a string."
   [source]
-  (parse/emit-source (parse/parse-string source)))
+  (core/sup->clj source))
+
+(defn ^:export supToForms
+  "Parse a superficie source string, return forms as a JS array of EDN strings."
+  [source]
+  (clj->js (mapv pr-str (core/sup->forms source))))
+
+;; Legacy exports for backward compatibility
+(def ^:export renderString toSup)
+(def ^:export parseString  toClj)

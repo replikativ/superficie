@@ -1,118 +1,169 @@
 (ns superficie.roundtrip-test
-  "Tests that Clojure -> .sup -> Clojure round-trips correctly."
+  "Tests that Clojure → .sup → Clojure round-trips correctly via the new pipeline."
   (:require [clojure.test :refer [deftest is testing]]
-            [superficie.render :as render]
-            [superficie.parse :as parse]
-            [superficie.resolve :as resolve]))
+            [superficie.core :as core]))
 
-(def ctx
-  "Default resolution context (clojure.core fully available)."
-  {:refers {} :aliases {} :excludes #{}})
-
-(defn roundtrip
-  "Render a Clojure form to .sup, then parse it back."
+(defn- roundtrip
+  "Convert a Clojure form to sup then back to a form."
   [form]
-  (let [rendered (render/render-form ctx form)]
-    (parse/parse-string rendered)))
+  (first (core/sup->forms (core/forms->sup [form]))))
+
+#?(:clj
+(defn- clj-roundtrip
+  "Convert a Clojure source string through sup and back."
+  [clj-src]
+  (core/sup->clj (core/clj->sup clj-src))))
+
+;; ---------------------------------------------------------------------------
+;; Atoms
+;; ---------------------------------------------------------------------------
 
 (deftest test-roundtrip-atoms
-  (testing "numbers"
-    (is (= 42 (roundtrip 42)))
-    (is (= 3.14 (roundtrip 3.14))))
-  (testing "strings"
-    (is (= "hello" (roundtrip "hello"))))
-  (testing "keywords"
-    (is (= :foo (roundtrip :foo)))
-    (is (= :foo/bar (roundtrip :foo/bar))))
-  (testing "symbols"
-    (is (= 'my-func (roundtrip 'my-func)))
-    (is (= 'foo/bar (roundtrip 'foo/bar))))
-  (testing "nil and booleans"
-    (is (nil? (roundtrip nil)))
-    (is (= true (roundtrip true)))
-    (is (= false (roundtrip false)))))
+  (is (= 42       (roundtrip 42)))
+  (is (= 3.14     (roundtrip 3.14)))
+  (is (= "hello"  (roundtrip "hello")))
+  (is (= :foo     (roundtrip :foo)))
+  (is (= :foo/bar (roundtrip :foo/bar)))
+  (is (= 'my-func (roundtrip 'my-func)))
+  (is (= 'foo/bar (roundtrip 'foo/bar)))
+  (is (nil?       (roundtrip nil)))
+  (is (= true     (roundtrip true)))
+  (is (= false    (roundtrip false))))
+
+;; ---------------------------------------------------------------------------
+;; Collections
+;; ---------------------------------------------------------------------------
 
 (deftest test-roundtrip-collections
-  (is (= [1 2 3] (roundtrip [1 2 3])))
-  (is (= {:a 1} (roundtrip {:a 1})))
-  (is (= #{1 2} (roundtrip #{1 2}))))
+  (is (= [1 2 3]    (roundtrip [1 2 3])))
+  (is (= {:a 1}     (roundtrip {:a 1})))
+  (is (= #{1 2}     (roundtrip #{1 2}))))
+
+;; ---------------------------------------------------------------------------
+;; Operators
+;; ---------------------------------------------------------------------------
 
 (deftest test-roundtrip-arithmetic
-  (is (= '(+ 1 2) (roundtrip '(+ 1 2))))
-  (is (= '(* a b) (roundtrip '(* a b))))
-  (is (= '(> x 0) (roundtrip '(> x 0))))
+  (is (= '(+ 1 2)   (roundtrip '(+ 1 2))))
+  (is (= '(* a b)   (roundtrip '(* a b))))
+  (is (= '(> x 0)   (roundtrip '(> x 0))))
   (is (= '(and a b) (roundtrip '(and a b))))
-  (is (= '(or a b) (roundtrip '(or a b)))))
+  (is (= '(or a b)  (roundtrip '(or a b)))))
+
+(deftest test-roundtrip-precedence
+  (is (= '(* (+ a b) c)    (roundtrip '(* (+ a b) c))))
+  (is (= '(+ (* a b) c)    (roundtrip '(+ (* a b) c))))
+  (is (= '(and (> a 0) (> b 0)) (roundtrip '(and (> a 0) (> b 0))))))
+
+;; ---------------------------------------------------------------------------
+;; Calls
+;; ---------------------------------------------------------------------------
 
 (deftest test-roundtrip-calls
-  (is (= '(println "hello") (roundtrip '(println "hello"))))
-  (is (= '(map inc [1 2 3]) (roundtrip '(map inc [1 2 3]))))
-  (is (= '(f) (roundtrip '(f)))))
+  (is (= '(println "hello")   (roundtrip '(println "hello"))))
+  (is (= '(map inc [1 2 3])   (roundtrip '(map inc [1 2 3]))))
+  (is (= '(f)                  (roundtrip '(f)))))
 
-(deftest test-roundtrip-interop
-  (is (= '(.toLowerCase s) (roundtrip '(.toLowerCase s))))
-  (is (= '(.getBytes s "UTF-8") (roundtrip '(.getBytes s "UTF-8")))))
+;; ---------------------------------------------------------------------------
+;; Blocks
+;; ---------------------------------------------------------------------------
 
 (deftest test-roundtrip-def
   (is (= '(def x 42) (roundtrip '(def x 42)))))
 
+(deftest test-roundtrip-defn
+  (is (= '(defn greet [name] (println name))
+         (roundtrip '(defn greet [name] (println name)))))
+  (is (= '(defn add [a b] (+ a b))
+         (roundtrip '(defn add [a b] (+ a b)))))
+  (testing "varargs"
+    (is (= '(defn foo [a b & rest] (apply + a b rest))
+           (roundtrip '(defn foo [a b & rest] (apply + a b rest))))))
+  (testing "multi-arity"
+    (is (= '(defn greet ([] (greet "World")) ([name] (str "Hello, " name)))
+           (roundtrip '(defn greet ([] (greet "World")) ([name] (str "Hello, " name))))))))
+
+(deftest test-roundtrip-defmacro
+  (is (= '(defmacro my-when [test & body] (list 'if test (cons 'do body)))
+         (roundtrip '(defmacro my-when [test & body] (list 'if test (cons 'do body)))))))
+
 (deftest test-roundtrip-if
   (is (= '(if (> x 0) "positive" "negative")
-         (roundtrip '(if (> x 0) "positive" "negative")))))
+         (roundtrip '(if (> x 0) "positive" "negative"))))
+  (is (= '(if (> x 0) "positive")
+         (roundtrip '(if (> x 0) "positive")))))
 
 (deftest test-roundtrip-let
   (is (= '(let [x 1 y 2] (+ x y))
          (roundtrip '(let [x 1 y 2] (+ x y))))))
 
-(deftest test-roundtrip-ns
-  (testing "ns with require and import"
-    (is (= '(ns myapp.core
-              (:require [clojure.string :as str]
-                        [clojure.set :refer [union intersection]])
-              (:import [java.util Date]))
-           (roundtrip '(ns myapp.core
-                         (:require [clojure.string :as str]
-                                   [clojure.set :refer [union intersection]])
-                         (:import [java.util Date]))))))
-  (testing "bare ns"
-    (is (= '(ns foo.bar)
-           (roundtrip '(ns foo.bar)))))
-  (testing "ns with gen-class"
-    (is (= '(ns foo.bar (:gen-class))
-           (roundtrip '(ns foo.bar (:gen-class)))))))
+(deftest test-roundtrip-when
+  (is (= '(when (> x 0) (println x))
+         (roundtrip '(when (> x 0) (println x)))))
+  (is (= '(when true (println "a") (println "b"))
+         (roundtrip '(when true (println "a") (println "b"))))))
 
-(deftest test-roundtrip-unary
-  (is (= '(not x) (roundtrip '(not x))))
-  (is (= '(deref atom) (roundtrip '(deref atom)))))
-
-(deftest test-roundtrip-quote-var
-  (testing "quote"
-    (is (= '(quote x) (roundtrip '(quote x))))
-    (is (= '(quote [1 2 3]) (roundtrip '(quote [1 2 3])))))
-  (testing "var"
-    (is (= '(var my-var) (roundtrip '(var my-var))))))
-
-(deftest test-roundtrip-varargs
-  (is (= '(defn foo [a b & rest] (apply + a b rest))
-         (roundtrip '(defn foo [a b & rest] (apply + a b rest))))))
-
-(deftest test-roundtrip-for
-  (is (= '(for [x (range 10) :when (even? x)] (* x x))
-         (roundtrip '(for [x (range 10) :when (even? x)] (* x x)))))
-  (is (= '(doseq [x [1 2 3]] (println x))
-         (roundtrip '(doseq [x [1 2 3]] (println x))))))
+(deftest test-roundtrip-cond
+  (is (= '(cond (< x 0) :neg (= x 0) :zero :else :pos)
+         (roundtrip '(cond (< x 0) :neg (= x 0) :zero :else :pos)))))
 
 (deftest test-roundtrip-case
-  (is (= '(case x :a 1 :b 2 :default)
-         (roundtrip '(case x :a 1 :b 2 :default))))
-  (is (= '(case x :a 1 :b 2)
-         (roundtrip '(case x :a 1 :b 2)))))
+  (is (= '(case x 1 "one" 2 "two" "other")
+         (roundtrip '(case x 1 "one" 2 "two" "other")))))
 
-(deftest test-roundtrip-binding-forms
-  (is (= '(when-let [x (get m :key)] (println x))
-         (roundtrip '(when-let [x (get m :key)] (println x)))))
-  (is (= '(if-let [x (find m :key)] x nil)
-         (roundtrip '(if-let [x (find m :key)] x nil)))))
+(deftest test-roundtrip-for
+  (is (= '(for [x xs y ys] [x y])
+         (roundtrip '(for [x xs y ys] [x y]))))
+  (is (= '(for [x xs :when (> x 0)] x)
+         (roundtrip '(for [x xs :when (> x 0)] x)))))
+
+(deftest test-roundtrip-try
+  (is (= '(try (/ 1 0) (catch ArithmeticException e (str e)) (finally (println "done")))
+         (roundtrip '(try (/ 1 0) (catch ArithmeticException e (str e)) (finally (println "done")))))))
+
+(deftest test-roundtrip-loop
+  (is (= '(loop [i 0] (when (< i 10) (recur (+ i 1))))
+         (roundtrip '(loop [i 0] (when (< i 10) (recur (+ i 1))))))))
+
+;; ---------------------------------------------------------------------------
+;; Threading
+;; ---------------------------------------------------------------------------
+
+(deftest test-roundtrip-threading
+  (is (= '(->> data (filter even?) (map inc))
+         (roundtrip '(->> data (filter even?) (map inc)))))
+  (is (= '(-> x (assoc :a 1) (update :b inc))
+         (roundtrip '(-> x (assoc :a 1) (update :b inc))))))
+
+;; ---------------------------------------------------------------------------
+;; Interop
+;; ---------------------------------------------------------------------------
+
+(deftest test-roundtrip-interop
+  (is (= '(.toLowerCase s)        (roundtrip '(.toLowerCase s))))
+  (is (= '(.getBytes s "UTF-8")   (roundtrip '(.getBytes s "UTF-8"))))
+  (is (= '(.-field obj)           (roundtrip '(.-field obj))))
+  (is (= '(Integer/parseInt "42") (roundtrip '(Integer/parseInt "42")))))
+
+(deftest test-roundtrip-constructor
+  ;; new Foo() → Foo.() → roundtrips back to (Foo.)
+  (is (= '(HashMap. 16) (roundtrip '(new HashMap 16)))))
+
+;; ---------------------------------------------------------------------------
+;; Destructuring
+;; ---------------------------------------------------------------------------
+
+(deftest test-roundtrip-destructuring
+  (is (= '(let [{:keys [a b]} m] (+ a b))
+         (roundtrip '(let [{:keys [a b]} m] (+ a b)))))
+  (is (= '(let [[x y] pair] (+ x y))
+         (roundtrip '(let [[x y] pair] (+ x y)))))
+  (is (= '(defn f [{:keys [x y]}] (+ x y))
+         (roundtrip '(defn f [{:keys [x y]}] (+ x y))))))
+
+;; ---------------------------------------------------------------------------
+;; Nested
+;; ---------------------------------------------------------------------------
 
 (deftest test-roundtrip-nested
   (is (= '(let [x 1] (if (> x 0) (+ x 1) (- x 1)))
@@ -120,130 +171,36 @@
   (is (= '(do (println "a") (let [x 1] x))
          (roundtrip '(do (println "a") (let [x 1] x))))))
 
-(deftest test-roundtrip-try
-  (is (= '(try (/ 1 0) (catch ArithmeticException e (str e)) (finally (println "done")))
-         (roundtrip '(try (/ 1 0) (catch ArithmeticException e (str e)) (finally (println "done")))))))
+;; ---------------------------------------------------------------------------
+;; clj-roundtrip (JVM only)
+;; ---------------------------------------------------------------------------
 
-(deftest test-roundtrip-loop
-  (is (= '(loop [i 0] (when (< i 10) (println i) (recur (+ i 1))))
-         (roundtrip '(loop [i 0] (when (< i 10) (println i) (recur (+ i 1))))))))
+#?(:clj
+(deftest test-clj-roundtrip-simple
+  (is (= "(+ 1 2)" (clj-roundtrip "(+ 1 2)")))
+  (is (= "(defn f [x] (+ x 1))"
+         (clj-roundtrip "(defn f [x] (+ x 1))")))
+  (is (= "(def x 42)" (clj-roundtrip "(def x 42)")))))
 
-(deftest test-roundtrip-threading
-  (is (= '(-> x (assoc :a 1) (update :b inc))
-         (roundtrip '(-> x (assoc :a 1) (update :b inc))))))
+#?(:clj
+(deftest test-clj-roundtrip-reader-conditional
+  (let [src "#?(:clj 1 :cljs 2)"
+        result (clj-roundtrip src)]
+    (is (re-find #"#\?" result)))))
 
-(deftest test-roundtrip-defmacro
-  (is (= '(defmacro my-when [test & body] (list 'if test (cons 'do body)))
-         (roundtrip '(defmacro my-when [test & body] (list 'if test (cons 'do body)))))))
+;; ---------------------------------------------------------------------------
+;; sup->clj / clj->sup text-to-text
+;; ---------------------------------------------------------------------------
 
-(deftest test-roundtrip-condp
-  (is (= '(condp = x 1 :one 2 :two :other)
-         (roundtrip '(condp = x 1 :one 2 :two :other))))
-  (is (= '(condp = x 1 :one 2 :two)
-         (roundtrip '(condp = x 1 :one 2 :two)))))
+(deftest test-sup->clj
+  (is (= "(+ 1 2)"
+         (core/sup->clj "1 + 2")))
+  (is (= "(defn f [x] (+ x 1))"
+         (core/sup->clj "defn f [x]:\n  x + 1\nend"))))
 
-(deftest test-roundtrip-multi-arity
-  (is (= '(defn greet ([] (greet "World")) ([name] (str "Hello, " name)))
-         (roundtrip '(defn greet ([] (greet "World")) ([name] (str "Hello, " name)))))))
-
-(deftest test-roundtrip-for-let
-  (is (= '(for [x (range 10) :let [y (* x x)] :when (even? y)] y)
-         (roundtrip '(for [x (range 10) :let [y (* x x)] :when (even? y)] y)))))
-
-(deftest test-roundtrip-precedence
-  (testing "lower-precedence sub-expressions preserved"
-    (is (= '(* (+ a b) c) (roundtrip '(* (+ a b) c))))
-    (is (= '(* a (+ b c)) (roundtrip '(* a (+ b c)))))
-    (is (= '(* (+ a b) (- c d)) (roundtrip '(* (+ a b) (- c d))))))
-  (testing "higher-precedence needs no parens and still round-trips"
-    (is (= '(+ (* a b) c) (roundtrip '(+ (* a b) c))))
-    (is (= '(+ a (* b c)) (roundtrip '(+ a (* b c))))))
-  (testing "logical with comparison"
-    (is (= '(and (> a 0) (> b 0)) (roundtrip '(and (> a 0) (> b 0)))))
-    (is (= '(and (or a b) c) (roundtrip '(and (or a b) c))))))
-
-(deftest test-roundtrip-core-async-symbols
-  (testing "core.async operator symbols as values"
-    (is (= '<! (roundtrip '<!)))
-    (is (= '>! (roundtrip '>!)))
-    (is (= '<!! (roundtrip '<!!)))
-    (is (= '>!! (roundtrip '>!!))))
-  (testing "core.async operator symbols in calls"
-    (is (= '(<! ch) (roundtrip '(<! ch))))
-    (is (= '(>! ch val) (roundtrip '(>! ch val))))
-    (is (= '(<!! ch) (roundtrip '(<!! ch))))
-    (is (= '(>!! ch val) (roundtrip '(>!! ch val))))))
-
-(deftest test-roundtrip-when-while
-  (testing "when block"
-    (is (= '(when (> x 0) (println x))
-           (roundtrip '(when (> x 0) (println x))))))
-  (testing "when with multiple body forms"
-    (is (= '(when true (println "a") (println "b"))
-           (roundtrip '(when true (println "a") (println "b"))))))
-  (testing "when-let"
-    (is (= '(when-let [x (get m :key)] (println x))
-           (roundtrip '(when-let [x (get m :key)] (println x))))))
-  (testing "while"
-    (is (= '(while (pos? (deref counter)) (swap! counter dec))
-           (roundtrip '(while (pos? (deref counter)) (swap! counter dec)))))))
-
-(deftest test-roundtrip-interop-extended
-  (testing "new constructor roundtrips to canonical form"
-    (is (= '(HashMap. 16)
-           (roundtrip '(new HashMap 16)))))
-  (testing "field access"
-    (is (= '(.-field obj)
-           (roundtrip '(.-field obj)))))
-  (testing "static method"
-    (is (= '(Integer/parseInt "42")
-           (roundtrip '(Integer/parseInt "42"))))))
-
-(deftest test-roundtrip-cond-threading
-  (testing "cond-> threading"
-    (is (= '(cond-> m true (assoc :a 1) false (assoc :b 2))
-           (roundtrip '(cond-> m true (assoc :a 1) false (assoc :b 2))))))
-  (testing "some-> renders as -> and roundtrips"
-    (is (= '(-> x (str/trim) (str/lower-case))
-           (roundtrip '(some-> x str/trim str/lower-case)))))
-  (testing "some->> renders as ->> and roundtrips"
-    (is (= '(->> x (filter odd?) (map inc))
-           (roundtrip '(some->> x (filter odd?) (map inc)))))))
-
-(deftest test-roundtrip-destructuring
-  (testing "map destructuring in let"
-    (is (= '(let [{:keys [a b]} m] (+ a b))
-           (roundtrip '(let [{:keys [a b]} m] (+ a b))))))
-  (testing "vector destructuring in let"
-    (is (= '(let [[x y] pair] (+ x y))
-           (roundtrip '(let [[x y] pair] (+ x y))))))
-  (testing "destructuring in defn"
-    (is (= '(defn f [{:keys [x y]}] (+ x y))
-           (roundtrip '(defn f [{:keys [x y]}] (+ x y)))))))
-
-;; let-flattening roundtrip tests
-(deftest test-roundtrip-let-flattening
-  (testing "simple tail let"
-    (is (= '(defn foo [x] (let [y (+ x 1)] (* y 2)))
-           (roundtrip '(defn foo [x] (let [y (+ x 1)] (* y 2)))))))
-  (testing "multi-binding tail let"
-    (is (= '(defn foo [x] (let [y 1 z 2] (+ y z)))
-           (roundtrip '(defn foo [x] (let [y 1 z 2] (+ y z)))))))
-  (testing "nested tail lets normalize to merged"
-    (is (= '(defn foo [x] (let [a 1 b 2] (+ a b)))
-           (roundtrip '(defn foo [x] (let [a 1] (let [b 2] (+ a b))))))))
-  (testing "non-tail let preserved"
-    (is (= '(defn foo [x] (let [y 1] (use y)) (other))
-           (roundtrip '(defn foo [x] (let [y 1] (use y)) (other))))))
-  (testing "let in if branches (flattened)"
-    (is (= '(if true (let [x 1] x) (let [y 2] y))
-           (roundtrip '(if true (let [x 1] x) (let [y 2] y))))))
-  (testing "let in when body"
-    (is (= '(when true (let [x 1] (println x) x))
-           (roundtrip '(when true (let [x 1] (println x) x))))))
-  (testing "let in do body"
-    (is (= '(do (let [x 1] (println x)))
-           (roundtrip '(do (let [x 1] (println x)))))))
-  (testing "let-statement parse only (no render involved)"
-    (is (= '(defn foo [x] (let [y 1] (+ x y)))
-           (parse/parse-string "defn foo(x):\n  let y := 1\n  x + y\nend")))))
+#?(:clj
+(deftest test-clj->sup
+  (is (= "1 + 2"
+         (core/clj->sup "(+ 1 2)")))
+  (is (= "defn f [x]:\n  x + 1\nend"
+         (core/clj->sup "(defn f [x] (+ x 1))")))))
