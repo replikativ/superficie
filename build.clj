@@ -105,3 +105,18 @@
                   (str "\"version\": \"" version "\""))]
     (spit "package.json" updated)
     (println (str "package.json version set to " version))))
+
+(defn npm-publish
+  "Bump version, build all JS targets, then publish to npm.
+   Requires npx and npm on PATH."
+  [_]
+  (npm-version nil)
+  (println "Building JS targets...")
+  (let [ret (b/process {:command-args ["npx" "shadow-cljs" "release" "npm" "browser" "browser-repl"]})]
+    (when (not= 0 (:exit ret))
+      (throw (ex-info "shadow-cljs build failed" {:exit (:exit ret)}))))
+  (println "Publishing to npm...")
+  (let [ret (b/process {:command-args ["npm" "publish"]})]
+    (when (not= 0 (:exit ret))
+      (throw (ex-info "npm publish failed" {:exit (:exit ret)}))))
+  (println (str "Published superficie " version " to npm.")))
