@@ -427,16 +427,38 @@
    (let [width (or (:width opts) default-width)]
      (pp form 0 width))))
 
+(defn- form-separator
+  "Determine the separator between two consecutive forms based on :line metadata.
+   If the next form starts on the line right after the previous form ends,
+   use a single newline. Otherwise use a blank line (double newline)."
+  [prev-form next-form]
+  (let [prev-end (when (and (some? prev-form)
+                            #?(:clj  (instance? clojure.lang.IMeta prev-form)
+                               :cljs (satisfies? IMeta prev-form))
+                            (meta prev-form))
+                   (:end-line (meta prev-form)))
+        next-start (elem-line next-form)]
+    (if (and prev-end next-start (= next-start (inc prev-end)))
+      "\n"
+      "\n\n")))
+
 (defn pprint-forms
-  "Pretty-print a sequence of Clojure forms as sup text,
-   separated by blank lines. Preserves comments from :ws metadata.
+  "Pretty-print a sequence of Clojure forms as sup text.
+   Uses :line metadata to determine spacing between forms:
+   consecutive forms get a single newline, others get a blank line.
    opts: {:width 80}"
   ([forms] (pprint-forms forms nil))
   ([forms opts]
    (let [trailing-ws (:trailing-ws (meta forms))
          trailing-comments (when trailing-ws
                              (extract-comments trailing-ws))
-         body (str/join "\n\n" (map #(pprint-form % opts) forms))]
+         rendered (mapv #(pprint-form % opts) forms)
+         body (if (<= (count rendered) 1)
+                (str/join rendered)
+                (let [pairs (map vector forms (rest forms))
+                      seps (mapv (fn [[a b]] (form-separator a b)) pairs)]
+                  (apply str (first rendered)
+                         (mapcat vector seps (rest rendered)))))]
      (if trailing-comments
        (str body "\n\n" (str/join "\n" trailing-comments))
        body))))
