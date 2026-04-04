@@ -130,17 +130,6 @@
             []
             (map-indexed vector effective-lines))))
 
-(defn- render-line-groups
-  "Render items grouped by original source lines.
-   pp-item-fn: (fn [item col width] -> string)"
-  [items inner-col inner-indent width pp-item-fn]
-  (let [effective-lines (assign-lines items)
-        groups (group-by-line effective-lines)]
-    (->> groups
-         (map (fn [{:keys [indices]}]
-                (str/join " " (map #(pp-item-fn (nth items %) inner-col width) indices))))
-         (str/join (str "\n" inner-indent)))))
-
 (defn- render-fill
   "Pack rendered strings onto lines up to width."
   [rendered-strs inner-col inner-indent width]
