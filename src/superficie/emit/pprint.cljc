@@ -71,6 +71,25 @@
                      (meta inner))
             (:line (meta inner)))))))
 
+(defn- elem-col
+  "Get the :column metadata from a form, or nil.
+   For reader-macro wrappers (deref, quote, var), checks the inner form."
+  [form]
+  (or (when (and (some? form)
+                 #?(:clj  (instance? clojure.lang.IMeta form)
+                    :cljs (satisfies? IMeta form))
+                 (meta form))
+        (:column (meta form)))
+      (when (and (seq? form) (seq form)
+                 (#{'clojure.core/deref 'quote 'var} (first form))
+                 (second form))
+        (let [inner (second form)]
+          (when (and (some? inner)
+                     #?(:clj  (instance? clojure.lang.IMeta inner)
+                        :cljs (satisfies? IMeta inner))
+                     (meta inner))
+            (:column (meta inner)))))))
+
 (defn- has-line-meta?
   "True if any item in the sequence has :line metadata."
   [items]
@@ -142,23 +161,70 @@
                  (if need-space? (str current-line " " s) s)
                  new-col))))))
 
+(defn- compute-alignment-col
+  "Compute the output column for a line group based on column alignment.
+   If a previous multi-item group established an alignment column, single-item
+   groups whose source column matches get indented to the same relative offset.
+   Returns the column to render at, or inner-col as default."
+  [indices items inner-col align-col-src align-col-out]
+  (if (and align-col-src align-col-out (= 1 (count indices)))
+    (let [item (nth items (first indices))
+          src-col (elem-col item)]
+      (if (and src-col (= src-col align-col-src))
+        align-col-out
+        inner-col))
+    inner-col))
+
 (defn- render-items
   "Render a sequence of items using line-hints when available, fill otherwise.
    pp-item-fn: (fn [item col width] -> string)
-   line-src-fn: (fn [item] -> form-to-check-for-line-meta)"
-  [items inner-col inner-indent width pp-item-fn line-src-fn]
-  (let [line-sources (mapv line-src-fn items)]
-    (if (has-line-meta? line-sources)
-      ;; Line-hint mode: group by original source line
-      (let [effective-lines (assign-lines line-sources)
-            groups (group-by-line effective-lines)]
-        (->> groups
-             (map (fn [{:keys [indices]}]
-                    (str/join " " (map #(pp-item-fn (nth items %) inner-col width) indices))))
-             (str/join (str "\n" inner-indent))))
-      ;; Fill mode: pack to width
-      (let [rendered (mapv #(pp-item-fn % inner-col width) items)]
-        (render-fill rendered inner-col inner-indent width)))))
+   line-src-fn: (fn [item] -> form-to-check-for-line-meta)
+   container-col: (optional) the :column of the enclosing container in source,
+                  used to compute relative alignment for sub-groups."
+  ([items inner-col inner-indent width pp-item-fn line-src-fn]
+   (render-items items inner-col inner-indent width pp-item-fn line-src-fn nil))
+  ([items inner-col inner-indent width pp-item-fn line-src-fn container-col]
+   (let [line-sources (mapv line-src-fn items)]
+     (if (has-line-meta? line-sources)
+       ;; Line-hint mode: group by original source line, with column alignment
+       (let [effective-lines (assign-lines line-sources)
+             groups (group-by-line effective-lines)]
+         (loop [remaining groups
+                result []
+                align-col-src nil   ; source column of the alignment anchor
+                align-col-out nil]  ; output column of the alignment anchor
+           (if (empty? remaining)
+             (str/join "\n" result)
+             (let [{:keys [indices]} (first remaining)
+                   ;; Detect alignment: multi-item group establishes anchor from
+                   ;; the last item's source column
+                   new-anchor? (and container-col (> (count indices) 1))
+                   last-item (nth items (peek indices))
+                   last-src-col (elem-col last-item)
+                   ;; Compute render column for this group
+                   render-col (compute-alignment-col
+                               indices items inner-col
+                               align-col-src align-col-out)
+                   render-indent (indent-str render-col)
+                   line-str (str/join " " (map #(pp-item-fn (nth items %) render-col width) indices))
+                   prefixed (if (seq result)
+                              (str render-indent line-str)
+                              line-str)
+                   ;; If this group is multi-item and has a last-item column,
+                   ;; compute the output column of that last item for alignment
+                   new-align-src (if (and new-anchor? last-src-col)
+                                   last-src-col
+                                   align-col-src)
+                   new-align-out (if (and new-anchor? last-src-col container-col)
+                                   ;; relative offset: how far the last item was
+                                   ;; from container start, applied to inner-col
+                                   (+ inner-col (- last-src-col container-col 1))
+                                   align-col-out)]
+               (recur (rest remaining) (conj result prefixed)
+                      new-align-src new-align-out)))))
+       ;; Fill mode: pack to width
+       (let [rendered (mapv #(pp-item-fn % inner-col width) items)]
+         (render-fill rendered inner-col inner-indent width))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Collection formatting
@@ -172,11 +238,13 @@
       flat-str
       (let [inner-col (inc col)
             inner-indent (indent-str inner-col)
-            items (vec form)]
+            items (vec form)
+            src-col (when (meta form) (:column (meta form)))]
         (str "["
              (render-items items inner-col inner-indent width
                            (fn [item c w] (pp item c w))
-                           identity)
+                           identity
+                           src-col)
              "]")))))
 
 (defn- pp-map-entry
