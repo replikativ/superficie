@@ -16,7 +16,7 @@
             #?(:clj  [clojure.tools.reader :as tr])
             #?(:clj  [clojure.tools.reader.reader-types :as tr-types])
             #?(:cljs [cljs.tools.reader :as cljs-reader])
-            #?(:cljs [cljs.tools.reader.reader-types :refer [string-push-back-reader]])))
+            #?(:cljs [cljs.tools.reader.reader-types :refer [indexing-push-back-reader]])))
 
 ;; ---------------------------------------------------------------------------
 ;; Text-to-form track
@@ -75,14 +75,15 @@
        (forms/->SupUnquoteSplicing (normalize-syntax-quote (second form)))
 
        (seq? form)
-       (apply list (map normalize-syntax-quote form))
+       (with-meta (apply list (map normalize-syntax-quote form)) (meta form))
 
        (vector? form)
-       (vec (map normalize-syntax-quote form))
+       (with-meta (vec (map normalize-syntax-quote form)) (meta form))
 
        (map? form)
-       (into {} (map (fn [[k v]] [(normalize-syntax-quote k)
-                                  (normalize-syntax-quote v)]) form))
+       (with-meta (into {} (map (fn [[k v]] [(normalize-syntax-quote k)
+                                             (normalize-syntax-quote v)]) form))
+         (meta form))
 
        :else form)))
 
@@ -94,7 +95,7 @@
   [clj-src]
   #?(:clj
      (let [read* @#'tr/read*
-           rdr   (tr-types/string-push-back-reader clj-src)]
+           rdr   (tr-types/indexing-push-back-reader clj-src)]
        (with-redefs [clojure.tools.reader/read-syntax-quote
                      (fn [rdr _backquote opts pending-forms]
                        (list 'clojure.core/syntax-quote
@@ -126,7 +127,7 @@
      ;;   x = primitive   → literal value
      ;;   x = (cljs.core/sequence …) or (cljs.core/vec …) → literal nested form
      ;;   x = anything else → was ~x (SupUnquote)
-     (let [rdr (string-push-back-reader clj-src)]
+     (let [rdr (indexing-push-back-reader clj-src)]
        (letfn [(sq-list? [f]
                  (and (seq? f)
                       (= 'cljs.core/sequence (first f))
@@ -174,18 +175,21 @@
                  (cond
                    (sq-vec? form)
                    (forms/->SupSyntaxQuote
-                    (vec (map sq-concat-elem (concat-args (second form)))))
+                    (with-meta (vec (map sq-concat-elem (concat-args (second form))))
+                      (meta form)))
                    (sq-list? form)
                    (forms/->SupSyntaxQuote
-                    (apply list (map sq-concat-elem (concat-args form))))
+                    (with-meta (apply list (map sq-concat-elem (concat-args form)))
+                      (meta form)))
                    (sq-empty-list? form)
                    (forms/->SupSyntaxQuote '())
                    (seq? form)
-                   (apply list (map denorm form))
+                   (with-meta (apply list (map denorm form)) (meta form))
                    (vector? form)
-                   (mapv denorm form)
+                   (with-meta (mapv denorm form) (meta form))
                    (map? form)
-                   (into {} (map (fn [[k v]] [(denorm k) (denorm v)]) form))
+                   (with-meta (into {} (map (fn [[k v]] [(denorm k) (denorm v)]) form))
+                     (meta form))
                    :else form))]
          (binding [cljs-reader/resolve-symbol (fn [s] s)
                    cljs-reader/*default-data-reader-fn* tagged-literal]
@@ -208,9 +212,11 @@
   ([sup-src opts] (forms->clj (sup->forms sup-src (merge {:read-cond :preserve} opts)))))
 
 (defn clj->sup
-  "Convert a Clojure source string to superficie syntax."
-  [clj-src]
-  (forms->sup (clj->forms clj-src)))
+  "Convert a Clojure source string to superficie syntax.
+   Uses width-aware pretty-printing (default 80 columns)."
+  ([clj-src] (clj->sup clj-src nil))
+  ([clj-src opts]
+   (pprint-sup (clj->forms clj-src) opts)))
 
 ;; ---------------------------------------------------------------------------
 ;; Pipeline access

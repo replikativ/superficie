@@ -108,7 +108,7 @@
 
 (def internal-meta-keys
   "Pipeline-internal metadata keys — not emitted by the printer."
-  #{:line :column :file :ws
+  #{:line :column :end-line :end-column :file :ws
     :sup/sugar :sup/order :sup/ns :sup/meta-chain})
 
 (defn strip-internal-meta
