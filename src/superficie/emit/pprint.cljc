@@ -272,11 +272,12 @@
             inner-indent (indent-str inner-col)
             all-args (vec (if head-args (concat head-args body-args) body-args))]
 
-        (if (and head-args
-                 (<= (+ col (count head-str) 1
-                        (count (str/join " " (map flat head-args))))
-                     width))
+        (cond
           ;; Head-line args fit on the first line
+          (and head-args
+               (<= (+ col (count head-str) 1
+                      (count (str/join " " (map flat head-args))))
+                   width))
           (let [head-args-str (str/join " " (map flat head-args))
                 first-line (str head-str "(" head-args-str)
                 body-vec (vec body-args)]
@@ -286,7 +287,30 @@
                                identity)
                  ")"))
 
-          ;; All args in body — use unified line-hint/fill strategy
+          ;; Unknown calls (not in head-line-args): try first arg on head line
+          (nil? n-head-args)
+          (let [first-arg-str (pp (first all-args) (+ col (count head-str) 1) width)
+                first-line (first (str/split-lines first-arg-str))
+                first-line-len (+ col (count head-str) 1 (count first-line))]
+            (if (<= first-line-len width)
+              ;; First arg (or its first line) fits on head line
+              (if (= 1 (count all-args))
+                (str head-str "(" first-arg-str ")")
+                (let [rest-args (vec (rest all-args))]
+                  (str head-str "(" first-arg-str "\n" inner-indent
+                       (render-items rest-args inner-col inner-indent width
+                                     (fn [item c w] (pp item c w))
+                                     identity)
+                       ")")))
+              ;; First arg doesn't fit — all in body
+              (str head-str "(\n" inner-indent
+                   (render-items all-args inner-col inner-indent width
+                                 (fn [item c w] (pp item c w))
+                                 identity)
+                   ")")))
+
+          ;; Known calls with 0 head-line-args — all in body
+          :else
           (str head-str "(\n" inner-indent
                (render-items all-args inner-col inner-indent width
                              (fn [item c w] (pp item c w))
