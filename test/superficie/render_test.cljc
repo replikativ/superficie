@@ -98,8 +98,12 @@
            (p/print-form '(defn greet "Greets a person" [name] (println name)))))))
 
 (deftest test-fn
-  (is (= "fn [x]:\n  x + 1\nend"
-         (p/print-form '(fn [x] (+ x 1))))))
+  ;; single-expression body inlines, delimited by `end`
+  (is (= "fn [x]: x + 1 end"
+         (p/print-form '(fn [x] (+ x 1)))))
+  ;; multi-expression body stays multi-line
+  (is (= "fn [x]:\n  println(x)\n  x + 1\nend"
+         (p/print-form '(fn [x] (println x) (+ x 1))))))
 
 (deftest test-if
   (is (= "if x > 0 :\n  \"pos\"\nelse:\n  \"neg\"\nend"
