@@ -171,9 +171,15 @@
    container-col: (optional) the :column of the enclosing container in source,
                   used to compute relative alignment for sub-groups."
   ([items inner-col inner-indent width pp-item-fn line-src-fn]
-   (render-items items inner-col inner-indent width pp-item-fn line-src-fn nil))
+   (render-items items inner-col inner-indent width pp-item-fn line-src-fn nil nil))
   ([items inner-col inner-indent width pp-item-fn line-src-fn container-col]
-   (let [line-sources (mapv line-src-fn items)]
+   (render-items items inner-col inner-indent width pp-item-fn line-src-fn container-col nil))
+  ([items inner-col inner-indent width pp-item-fn line-src-fn container-col item-sep]
+   (let [line-sources (mapv line-src-fn items)
+         last-idx (dec (count items))
+         ;; item-sep (e.g. ",") is appended after every item except the last,
+         ;; so vertical maps keep their commas the flat printer already emits.
+         sep-for (fn [idx s] (if (and item-sep (not= idx last-idx)) (str s item-sep) s))]
      (if (has-line-meta? line-sources)
        ;; Line-hint mode: group by original source line, with column alignment
        (let [effective-lines (assign-lines line-sources)
@@ -195,7 +201,7 @@
                                indices items inner-col
                                align-col-src align-col-out)
                    render-indent (indent-str render-col)
-                   line-str (str/join " " (map #(pp-item-fn (nth items %) render-col width) indices))
+                   line-str (str/join " " (map #(sep-for % (pp-item-fn (nth items %) render-col width)) indices))
                    prefixed (if (seq result)
                               (str render-indent line-str)
                               line-str)
@@ -261,7 +267,8 @@
              (render-items entries inner-col inner-indent width
                            (fn [entry c w] (pp-map-entry entry c w))
                            ;; Line source: use whichever of key/value has :line
-                           (fn [[k v]] (if (elem-line v) v (if (elem-line k) k v))))
+                           (fn [[k v]] (if (elem-line v) v (if (elem-line k) k v)))
+                           nil ",")
              "}")))))
 
 (defn- pp-set
@@ -352,7 +359,13 @@
             (if (<= first-line-len width)
               ;; First arg (or its first line) fits on head line
               (if (= 1 (count all-args))
-                (str head-str "(" first-arg-str ")")
+                (let [a (first all-args)]
+                  (if (and (coll? a) (not (seq? a)) (str/includes? first-arg-str "\n"))
+                    ;; A single multi-line collection reads far cleaner on its
+                    ;; own line at a shallow indent than staircased after the
+                    ;; call head. Re-render it at inner-col.
+                    (str head-str "(\n" inner-indent (pp a inner-col width) ")")
+                    (str head-str "(" first-arg-str ")")))
                 (let [rest-args (vec (rest all-args))]
                   (str head-str "(" first-arg-str "\n" inner-indent
                        (render-items rest-args inner-col inner-indent width
@@ -455,9 +468,12 @@
                     (str "#'" (flat (second form)))
 
                     ;; Block forms (defn, if, let, etc.) — delegate to printer
-                    ;; which already produces correct multi-line block syntax
+                    ;; which already produces correct multi-line block syntax.
+                    ;; Bind *indent* to the current column so the block body and
+                    ;; its `end` retain the enclosing indentation instead of
+                    ;; collapsing to column 0 when nested in an argument list.
                     (and (call? form) (symbol? (first form)) (block-form? (first form)))
-                    (flat form)
+                    (binding [printer/*indent* (indent-str col)] (flat form))
 
                     ;; Non-block calls — width-aware formatting
                     (call? form)

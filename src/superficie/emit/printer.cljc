@@ -231,9 +231,13 @@
       ;; single arity with vector params
       (and (seq rest2) (vector? (first rest2)))
       (let [[params & body] rest2]
-        (str prefix " " (print-form params) ":\n"
-             (print-body (vec body)) "\n"
-             *indent* "end"))
+        (if (= 1 (count body))
+          ;; single-expression body: inline, delimited by `end` so it stays
+          ;; unambiguous on one line (no indentation-sensitivity needed).
+          (str prefix " " (print-form params) ": " (print-form (first body)) " end")
+          (str prefix " " (print-form params) ":\n"
+               (print-body (vec body)) "\n"
+               *indent* "end")))
       ;; params not a vector — fall back to call syntax (fn used as local variable)
       :else
       (str head-str "(" (when name-sym (str name-sym " "))
