@@ -48,8 +48,8 @@
 ;; ---------------------------------------------------------------------------
 
 (deftest test-function-call
-  (is (= "println(\"hello\" \"world\")" (p/print-form '(println "hello" "world"))))
-  (is (= "map(inc [1 2 3])"             (p/print-form '(map inc [1 2 3]))))
+  (is (= "println(\"hello\", \"world\")" (p/print-form '(println "hello" "world"))))
+  (is (= "map(inc, [1 2 3])"             (p/print-form '(map inc [1 2 3]))))
   (is (= "f()"                          (p/print-form '(f)))))
 
 ;; ---------------------------------------------------------------------------
@@ -61,7 +61,7 @@
   (is (= "defonce y: 0" (p/print-form '(defonce y 0))))
   (is (= "defmulti area: :shape" (p/print-form '(defmulti area :shape))))
   (testing "defmulti complex form falls back to call syntax"
-    (is (= "defmulti(foo :dispatch :default :other)"
+    (is (= "defmulti(foo, :dispatch, :default, :other)"
            (p/print-form '(defmulti foo :dispatch :default :other))))))
 
 (deftest test-defmethod
@@ -91,7 +91,7 @@
          (p/print-form '(proxy [java.io.InputStream] [] (read [] -1))))))
 
 (deftest test-defn
-  (is (= "defn greet [name]:\n  str(\"Hello\" name)\nend"
+  (is (= "defn greet [name]:\n  str(\"Hello\", name)\nend"
          (p/print-form '(defn greet [name] (str "Hello" name)))))
   (testing "with docstring"
     (is (= "defn greet \"Greets a person\" [name]:\n  println(name)\nend"
@@ -135,7 +135,7 @@
 (deftest test-threading
   (is (= "accounts |> filter(:active) |> map(:balance) |> reduce(+)"
          (p/print-form '(->> accounts (filter :active) (map :balance) (reduce +)))))
-  (is (= "account .> update(:balance *(1.05))"
+  (is (= "account .> update(:balance, *(1.05))"
          (p/print-form '(-> account (update :balance (* 1.05)))))))
 
 ;; ---------------------------------------------------------------------------
@@ -144,7 +144,7 @@
 
 (deftest test-interop
   (is (= "\"hello\".toUpperCase()"     (p/print-form '(.toUpperCase "hello"))))
-  (is (= "\"hello\".replace(\"l\" \"r\")" (p/print-form '(.replace "hello" "l" "r"))))
+  (is (= "\"hello\".replace(\"l\", \"r\")" (p/print-form '(.replace "hello" "l" "r"))))
   (is (= "point.-x"                    (p/print-form '(.-x point))))
   (is (= "Math/abs(-1)"               (p/print-form '(Math/abs -1))))
   (is (= "new java.util.Date()"       (p/print-form '(java.util.Date.))))
@@ -182,6 +182,19 @@
     (let [result (core/clj->sup "(def a 1)\n(def b 2)")]
       (is (str/includes? result "def a: 1"))
       (is (str/includes? result "def b: 2")))))
+
+(deftest test-clj->sup-width-aware-def-map
+  (let [source (str "(def cfg {:store {:backend :file :path \"./db\" :id (random-uuid)}\n"
+                    "          :keep-history? true :schema-flexibility :read})")]
+    (is (= (str "def cfg: {:store {:backend :file, :path \"./db\", :id random-uuid()},\n"
+                "          :keep-history? true, :schema-flexibility :read}")
+           (core/clj->sup source)))
+    (is (= (core/forms->clj (core/clj->forms source))
+           (core/sup->clj (core/clj->sup source))))))
+
+(deftest test-pprint-multiline-call-commas
+  (is (= "f(alpha,\n  beta,\n  gamma,\n  delta)"
+         (core/pprint-sup ['(f alpha beta gamma delta)] {:width 12}))))
 
 (deftest test-forms->sup
   (is (= "def x: 42\n\nprintln(x)"
