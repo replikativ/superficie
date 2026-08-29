@@ -201,7 +201,14 @@
                                indices items inner-col
                                align-col-src align-col-out)
                    render-indent (indent-str render-col)
-                   line-str (str/join " " (map #(sep-for % (pp-item-fn (nth items %) render-col width)) indices))
+                   rendered (mapv #(sep-for % (pp-item-fn (nth items %) render-col width)) indices)
+                   ;; Source line hints should not override the requested width.
+                   ;; Re-fill an overlong same-line group while retaining explicit
+                   ;; source breaks between groups.
+                   line-str (if (and (> (count rendered) 1)
+                                     (not-any? #(str/includes? % "\n") rendered))
+                              (render-fill rendered render-col render-indent width)
+                              (str/join " " rendered))
                    prefixed (if (seq result)
                               (str render-indent line-str)
                               line-str)
@@ -218,7 +225,10 @@
                (recur (rest remaining) (conj result prefixed)
                       new-align-src new-align-out)))))
        ;; Fill mode: pack to width
-       (let [rendered (mapv #(pp-item-fn % inner-col width) items)]
+       (let [rendered (mapv (fn [idx item]
+                              (sep-for idx (pp-item-fn item inner-col width)))
+                            (range (count items))
+                            items)]
          (render-fill rendered inner-col inner-indent width))))))
 
 ;; ---------------------------------------------------------------------------
@@ -307,6 +317,26 @@
    '-> 1, '->> 1, 'some-> 1, 'some->> 1, 'as-> 2,
    'deftest 1, 'testing 1, 'is 0, 'are 0})
 
+(def ^:private def-heads
+  #{'def 'defonce 'defmulti
+    'clojure.core/def 'clojure.core/defonce 'clojure.core/defmulti})
+
+(defn- pp-simple-def
+  "Render the simple def block shape with a width-aware value."
+  [form col width]
+  (let [[head name-sym & rest1] form
+        [docstring rest2] (if (string? (first rest1))
+                            [(first rest1) (rest rest1)]
+                            [nil rest1])]
+    (when (= 1 (count rest2))
+      (let [flat-str (flat form)]
+        (if (<= (+ col (count flat-str)) width)
+          flat-str
+          (let [prefix (str (name head) " " (flat name-sym)
+                            (when docstring (str " " (pr-str docstring)))
+                            ": ")]
+            (str prefix (pp (first rest2) (+ col (count prefix)) width))))))))
+
 (defn- pp-call-smart
   "Pretty-print a call, keeping leading args with the head when appropriate.
    Uses line-hints for arg placement when available, fill otherwise."
@@ -340,15 +370,15 @@
           ;; Head-line args fit on the first line
           (and head-args
                (<= (+ col (count head-str) 1
-                      (count (str/join " " (map flat head-args))))
+                      (count (str/join ", " (map flat head-args))))
                    width))
-          (let [head-args-str (str/join " " (map flat head-args))
+          (let [head-args-str (str/join ", " (map flat head-args))
                 first-line (str head-str "(" head-args-str)
                 body-vec (vec body-args)]
-            (str first-line "\n" inner-indent
+            (str first-line ",\n" inner-indent
                  (render-items body-vec inner-col inner-indent width
                                (fn [item c w] (pp item c w))
-                               identity)
+                               identity nil ",")
                  ")"))
 
           ;; Unknown calls (not in head-line-args): try first arg on head line
@@ -367,16 +397,16 @@
                     (str head-str "(\n" inner-indent (pp a inner-col width) ")")
                     (str head-str "(" first-arg-str ")")))
                 (let [rest-args (vec (rest all-args))]
-                  (str head-str "(" first-arg-str "\n" inner-indent
+                  (str head-str "(" first-arg-str ",\n" inner-indent
                        (render-items rest-args inner-col inner-indent width
                                      (fn [item c w] (pp item c w))
-                                     identity)
+                                     identity nil ",")
                        ")")))
               ;; First arg doesn't fit — all in body
               (str head-str "(\n" inner-indent
                    (render-items all-args inner-col inner-indent width
                                  (fn [item c w] (pp item c w))
-                                 identity)
+                                 identity nil ",")
                    ")")))
 
           ;; Known calls with 0 head-line-args — all in body
@@ -384,7 +414,7 @@
           (str head-str "(\n" inner-indent
                (render-items all-args inner-col inner-indent width
                              (fn [item c w] (pp item c w))
-                             identity)
+                             identity nil ",")
                ")"))))))
 
 ;; ---------------------------------------------------------------------------
@@ -472,6 +502,10 @@
                     ;; Bind *indent* to the current column so the block body and
                     ;; its `end` retain the enclosing indentation instead of
                     ;; collapsing to column 0 when nested in an argument list.
+                    (and (call? form) (contains? def-heads (first form))
+                         (pp-simple-def form col width))
+                    (pp-simple-def form col width)
+
                     (and (call? form) (symbol? (first form)) (block-form? (first form)))
                     (binding [printer/*indent* (indent-str col)] (flat form))
 

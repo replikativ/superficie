@@ -23,9 +23,10 @@
 ;; ---------------------------------------------------------------------------
 
 (defn- print-args
-  "Print a sequence of forms separated by spaces."
+  "Print function arguments. Superficie uses familiar comma separators;
+   Clojure output retains conventional whitespace separators."
   [forms]
-  (str/join " " (map #(print-form %) forms)))
+  (str/join (if (= *mode* :sup) ", " " ") (map #(print-form %) forms)))
 
 (defn- percent-param?
   "Is sym a % parameter symbol (%1, %2, %&)?"
@@ -192,11 +193,7 @@
       (and (seq rest3) (seq? (first rest3)) (vector? (first (first rest3))))
       ;; multi-arity: fall back to call syntax for roundtrippability.
       ;; Block syntax can't distinguish arity boundaries on re-parse.
-      (str head-str "(" (print-form name-sym)
-           (when docstring (str " " (pr-str docstring)))
-           (when attr-map (str " " (print-form attr-map)))
-           " " (str/join " " (map print-form rest3))
-           ")")
+      (str head-str "(" (print-args args) ")")
       ;; single arity with vector params (normal case, including ^Hint [params])
       ;; Exception: if name is "=>" the block-kind->start? arrow guard prevents detection → call syntax
       (and (seq rest3) (vector? (first rest3))
@@ -209,11 +206,7 @@
              *indent* "end"))
       ;; params is not a vector — fall back to call syntax (e.g. fn used as local variable)
       :else
-      (str head-str "(" (print-form name-sym)
-           (when docstring (str " " (pr-str docstring)))
-           (when attr-map (str " " (print-form attr-map)))
-           (when (seq rest3) (str " " (str/join " " (map print-form rest3))))
-           ")"))))
+      (str head-str "(" (print-args args) ")"))))
 
 (defn- print-fn-block [head args]
   (let [head-str (clojure.core/name head)
@@ -225,9 +218,7 @@
     (cond
       (and (seq rest2) (seq? (first rest2)) (vector? (first (first rest2))))
       ;; multi-arity: fall back to call syntax for roundtrippability
-      (str head-str "(" (when name-sym (str name-sym " "))
-           (str/join " " (map print-form rest2))
-           ")")
+      (str head-str "(" (print-args args) ")")
       ;; single arity with vector params
       (and (seq rest2) (vector? (first rest2)))
       (let [[params & body] rest2]
@@ -240,9 +231,7 @@
                *indent* "end")))
       ;; params not a vector — fall back to call syntax (fn used as local variable)
       :else
-      (str head-str "(" (when name-sym (str name-sym " "))
-           (str/join " " (map print-form rest2))
-           ")"))))
+      (str head-str "(" (print-args args) ")"))))
 
 (defn- print-if-block [args]
   (let [[cond-form then-form & more] args
@@ -652,8 +641,8 @@
               ;; - not ending with a number literal (would look like "1.method")
               ;; - not namespace-qualified (contains '/')
               ;; - not prefixed with ~, @, ' operators
-              ;; - no spaces (complex expressions like "or(a b)" are ambiguous in arg position:
-              ;;   "f(or(a b).method())" would be parsed as "f(or(a (.method b)))")
+              ;; - no spaces (complex expressions like "or(a, b)" are ambiguous in arg position:
+              ;;   "f(or(a, b).method())" would be parsed as "f(or(a, (.method b)))")
               ;; - not a boolean/nil literal: "true.setDaemon()" reads "true" as Symbol, not Boolean
               last-word (last (str/split (str/trim obj-str) #"\s+"))
               safe? (and (not (re-matches #"-?[0-9].*" last-word))
@@ -664,7 +653,7 @@
                          (not (#{"true" "false" "nil"} obj-str)))]
           (if safe?
             (str obj-str "." method-name "(" (print-args method-args) ")")
-            (str "." method-name "(" obj-str (when (seq method-args) (str " " (print-args method-args))) ")")))
+            (str "." method-name "(" obj-str (when (seq method-args) (str ", " (print-args method-args))) ")")))
 
         ;; sup mode: Java field access — (.-field obj) → obj.-field
         ;; Same safety check for number-ending obj expressions.
@@ -737,12 +726,13 @@
 
           :else
           ;; Qualify operator-symbol args in non-first/non-last positions to avoid
-          ;; infix consumption: f(a + b) is (f (+ a b)), but f(a clojure.core/+ b) is (f a + b).
+          ;; infix consumption when commas are omitted by hand. The renderer emits
+          ;; f(a, clojure.core/+, b), preserving (f a + b) unambiguously.
           (let [args (vec (rest form))
                 n    (count args)]
             (str (print-form head)
                  "("
-                 (str/join " "
+                 (str/join ", "
                            (map-indexed
                             (fn [i arg]
                               (if (and (> i 0) (< i (dec n))

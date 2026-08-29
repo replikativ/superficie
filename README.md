@@ -142,7 +142,7 @@ defn factorial [n]:
     if i <= 1 :
       acc
     else:
-      recur(dec(i) acc * i)
+      recur(dec(i), acc * i)
     end
   end
 end
@@ -165,7 +165,7 @@ end
 
 case method :
   :get  => fetch(path)
-  :post => create(path body)
+  :post => create(path, body)
   =>      not-found()
 end
 ```
@@ -189,7 +189,7 @@ end
 users |> filter(:active) |> map(:name) |> sort() |> take(10)
 
 ;; -> becomes .>
-config .> assoc(:port 8080) .> merge(defaults)
+config .> assoc(:port, 8080) .> merge(defaults)
 ```
 
 ### Java Interop
@@ -282,9 +282,9 @@ defmacro -> [x & forms]:
   loop [x x, forms forms]:
     if forms :
       let [form first(forms), threaded if seq?(form):
-        `~first(form)(~x ~@next(form))
+        `~first(form)(~x, ~@next(form))
       else:
-        list(form x)
+        list(form, x)
       end]:
         recur(threaded next(forms))
       end
@@ -295,11 +295,11 @@ defmacro -> [x & forms]:
 end
 ```
 
-User-defined macros are called with function syntax (`unless(pred body)`). Block syntax (`unless pred: body end`) is reserved for macros registered in the block registry — either built-in forms or library macros that explicitly declare their surface block kind via `:superficie/role` metadata.
+User-defined macros are called with function syntax (`unless(pred, body)`). Block syntax (`unless pred: body end`) is reserved for macros registered in the block registry — either built-in forms or library macros that explicitly declare their surface block kind via `:superficie/role` metadata.
 
 ### Function Call Fallback
 
-The renderer never fails. Any Clojure form that doesn't match a known block pattern or operator is rendered using function call syntax — `f(a b c)` — which is always valid superficie and always round-trips cleanly:
+The renderer never fails. Any Clojure form that doesn't match a known block pattern or operator is rendered using comma-separated function call syntax — `f(a, b, c)` — which is always valid superficie and always round-trips cleanly:
 
 ```clojure
 ;; Clojure
@@ -310,7 +310,7 @@ The renderer never fails. Any Clojure form that doesn't match a known block patt
 ```
 ;; Superficie — list call renders as a regular function call
 defmacro my-macro [x]:
-  list('if x :yes :no)
+  list('if, x, :yes, :no)
 end
 ```
 
@@ -387,7 +387,7 @@ defmacro unless [pred & body]:
 end
 
 ;; Next input — unless is available immediately:
-unless((= 1 2) println("1 != 2"))
+unless((= 1 2), println("1 != 2"))
 ```
 
 ## Usage
@@ -523,7 +523,7 @@ A highlight.js plugin is provided at `dist/superficie.hljs.js`:
 
 <pre><code class="language-superficie">
 defn greet [name]:
-  str("Hello" name "!")
+  str("Hello", name, "!")
 end
 </code></pre>
 ```
