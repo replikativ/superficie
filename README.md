@@ -508,6 +508,33 @@ A separate REPL bundle at `dist/browser-repl/superficie-repl.js` includes a full
 </script>
 ```
 
+The same bundle can create a tree of forkable SCI runtimes. Definitions,
+functions, Var roots and metadata, atoms, and volatiles already present at a
+fork remain usable in both worlds, while later mutations are isolated.
+Dynamic binding scopes behave normally within each world; forking this
+quiescent browser REPL does not capture a running call stack:
+
+```html
+<script src="dist/browser-repl/superficie-repl.js"></script>
+<script>
+  const repl = superficieRepl.createForkable();
+  const root = repl.rootId;
+
+  repl.evalSup(root, 'def counter: atom(0)');
+  const child = repl.fork(root, {label: 'experiment'});
+  repl.evalSup(child.id, 'swap!(counter, inc)');
+
+  repl.evalSup(root, 'deref(counter)').result;     // "0"
+  repl.evalSup(child.id, 'deref(counter)').result; // "1"
+  repl.worlds(); // [{id: "root", ...}, {id: "world-1", ...}]
+</script>
+```
+
+`evalClj(worldId, source)` evaluates Clojure syntax in the same runtime. SCI
+contexts remain opaque; browser code addresses worlds by ID. Evaluations have
+a cooperative three-second budget by default, configurable with
+`createForkable({maxRuntimeMs: 1000})`.
+
 The [playground](https://replikativ.github.io/superficie/examples/playground.html) includes a live REPL panel using this bundle.
 
 ### Syntax Highlighting

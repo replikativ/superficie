@@ -2,7 +2,14 @@
   "SCI-based REPL for superficie in the browser.
    Exposes globalThis.superficieRepl with:
      .evalSup(src) — parse + eval superficie source, returns {result, output, error}
-     .reset()      — clear all defs and restart the context"
+     .reset()      — clear all defs and restart the default context
+
+   Forkable sessions are available through .createForkable():
+     .evalSup(worldId, src) — evaluate Superficie in one world
+     .evalClj(worldId, src) — evaluate Clojure in one world
+     .fork(worldId, opts)   — fork a world and return its description
+     .worlds()              — list the session's worlds
+     .reset()               — replace the session with a fresh root world"
   (:require [superficie.core :as core]
             [superficie.operators :as ops]
             [superficie.parse.expander :as expander]
@@ -87,14 +94,22 @@
     {:sci/macro true}))
 
 ;; ---------------------------------------------------------------------------
-;; SCI context — persists definitions across evaluations
+;; SCI contexts — definitions persist within a world and diverge across forks
 ;; ---------------------------------------------------------------------------
 
-(defonce ^:private out-buf (atom []))
+(def ^:private root-world-id "root")
+(def ^:private default-eval-budget-ms 3000)
 
-(defn- make-ctx []
+(defn- make-ctx [out-buf deadline runtime-mode]
   (sci/init
-   {:print-fn   (fn [s] (swap! out-buf conj s))
+   {:runtime-mode runtime-mode
+    :print-fn   (fn [s] (swap! out-buf conj s))
+    :print-err-fn (fn [s] (swap! out-buf conj s))
+    :interrupt-fn
+    (fn []
+      (when-let [limit @deadline]
+        (when (> (.now js/Date) limit)
+          (throw (js/Error. "Evaluation exceeded its time budget")))))
     :classes    {'Math js/Math}
     :namespaces
     {;; Register match in clojure.core.match for qualified require
@@ -116,34 +131,125 @@
                           '>>    ops/>>
                           '<<    ops/<<}}}))
 
-(defonce ctx (atom (make-ctx)))
-
 ;; ---------------------------------------------------------------------------
 ;; Evaluation
 ;; ---------------------------------------------------------------------------
 
-(defn eval-sup
-  "Parse and evaluate a superficie source string in the SCI context.
+(defn- eval-result
+  "Evaluate source in ctx as either :superficie or :clojure.
    Returns a JS object with:
      .result  — pr-str of the last form's value (string)
      .output  — captured stdout (print/println calls)
      .error   — error message string, or null"
-  [src]
+  [ctx out-buf deadline budget-ms language src]
   (reset! out-buf [])
+  (reset! deadline (+ (.now js/Date) budget-ms))
   (try
-    (let [forms  (expander/expand-forms (core/sup->forms src))
-          result (reduce (fn [_ form] (sci/eval-form @ctx form)) nil forms)
+    (let [result (case language
+                   :superficie
+                   (let [forms (expander/expand-forms (core/sup->forms src))]
+                     (reduce (fn [_ form] (sci/eval-form ctx form)) nil forms))
+
+                   :clojure
+                   (sci/eval-string* ctx src))
           output (str/join @out-buf)]
       #js {:result (pr-str result) :output output :error nil})
     (catch :default e
       #js {:result nil
            :output (str/join @out-buf)
-           :error  (or (.-message e) (str e))})))
+           :error  (or (.-message e) (str e))})
+    (finally
+      (reset! deadline nil))))
+
+(defn- world-description [{:keys [id parent-id label]}]
+  #js {:id id :parentId parent-id :label label})
+
+(defn- session-worlds [{:keys [world-order worlds]}]
+  (to-array (map #(world-description (get worlds %)) world-order)))
+
+(defn- find-world [session-state world-id]
+  (or (get-in @session-state [:worlds world-id])
+      (throw (js/Error. (str "Unknown SCI world: " world-id)))))
+
+(defn- option-value [opts property fallback]
+  (let [value (when opts (aget opts property))]
+    (if (nil? value) fallback value)))
+
+(defn create-forkable-session
+  "Create an isolated tree of forkable SCI REPL worlds.
+
+   The returned JavaScript object keeps SCI contexts opaque and addresses them
+   by stable string IDs. opts may provide maxRuntimeMs for the cooperative SCI
+   interrupt budget."
+  ([] (create-forkable-session nil))
+  ([opts]
+   (let [out-buf (atom [])
+         deadline (atom nil)
+         requested-budget (option-value opts "maxRuntimeMs" default-eval-budget-ms)
+         budget-ms (if (and (number? requested-budget) (pos? requested-budget))
+                     requested-budget
+                     default-eval-budget-ms)
+         make-root #(hash-map
+                     :next-id 1
+                     :world-order [root-world-id]
+                     :worlds
+                     {root-world-id
+                      {:id root-world-id
+                       :parent-id nil
+                       :label "Original"
+                       :ctx (make-ctx out-buf deadline :forkable)}})
+         session-state (atom (make-root))
+         evaluate (fn [language world-id src]
+                    (let [{:keys [ctx]} (find-world session-state world-id)]
+                      (eval-result ctx out-buf deadline budget-ms language src)))
+         fork-world (fn [world-id fork-opts]
+                      (let [{:keys [ctx]} (find-world session-state world-id)
+                            next-id (:next-id @session-state)
+                            child-id (str "world-" next-id)
+                            child {:id child-id
+                                   :parent-id world-id
+                                   :label (option-value fork-opts "label"
+                                                        (str "Fork " next-id))
+                                   :ctx (sci/fork ctx)}]
+                        (swap! session-state
+                               (fn [state]
+                                 (-> state
+                                     (assoc :next-id (inc next-id))
+                                     (update :world-order conj child-id)
+                                     (assoc-in [:worlds child-id] child))))
+                        (world-description child)))
+         reset-session (fn []
+                         (reset! session-state (make-root))
+                         (world-description
+                          (get-in @session-state [:worlds root-world-id])))]
+     #js {:rootId root-world-id
+          :evalSup (fn [world-id src]
+                     (evaluate :superficie world-id src))
+          :evalClj (fn [world-id src]
+                     (evaluate :clojure world-id src))
+          :fork fork-world
+          :worlds (fn [] (session-worlds @session-state))
+          :reset reset-session})))
+
+(defn- make-default-repl []
+  (let [out-buf (atom [])
+        deadline (atom nil)]
+    {:out-buf out-buf
+     :deadline deadline
+     :ctx (make-ctx out-buf deadline :standard)}))
+
+(defonce ^:private default-repl (atom (make-default-repl)))
+
+(defn eval-sup
+  "Evaluate Superficie source in the backwards-compatible default REPL."
+  [src]
+  (let [{:keys [ctx out-buf deadline]} @default-repl]
+    (eval-result ctx out-buf deadline default-eval-budget-ms :superficie src)))
 
 (defn reset-ctx!
-  "Clear all definitions and restart the SCI context."
+  "Clear all definitions and restart the backwards-compatible default REPL."
   []
-  (reset! ctx (make-ctx))
+  (reset! default-repl (make-default-repl))
   nil)
 
 ;; ---------------------------------------------------------------------------
@@ -152,4 +258,5 @@
 
 (set! (.-superficieRepl js/globalThis)
       #js {:evalSup eval-sup
-           :reset   reset-ctx!})
+           :reset reset-ctx!
+           :createForkable create-forkable-session})
