@@ -28,7 +28,7 @@
   :cljs {:extra-paths ["test"]
          :extra-deps {org.clojure/clojurescript {:mvn/version "1.11.132"}
                       thheller/shadow-cljs {:mvn/version "2.26.0"}
-                      org.babashka/sci {:mvn/version "0.11.50"}
+                      io.github.whilo/sci {:git/sha "8ef4d70c7c001709564908892e858d6d129c1740"}
                       org.clojure/core.match {:mvn/version "1.0.1"}}}
 
   ;; Run CLI
