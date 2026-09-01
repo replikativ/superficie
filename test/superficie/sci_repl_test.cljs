@@ -1,5 +1,6 @@
 (ns superficie.sci-repl-test
   (:require [cljs.test :refer [deftest is testing]]
+            [clojure.string :as str]
             [superficie.sci-repl :as repl]))
 
 (def seed
@@ -17,8 +18,10 @@ state()")
   (let [session (repl/create-forkable-session)
         root-id (.-rootId session)]
     (is (= "root" root-id))
-    (is (= "{:label :root, :counter 0, :alias 0}"
-           (.-result (.evalSup session root-id seed))))
+    (let [result (.evalSup session root-id seed)]
+      (is (= "{:label :root, :counter 0, :alias 0}" (.-result result)))
+      (is (= seed (.-sourceSup result)))
+      (is (str/includes? (.-sourceClj result) "(def label :root)")))
     (is (= ":root"
            (.-result
             (.evalClj session root-id
@@ -33,7 +36,10 @@ state()")
         (is (= "{:label :root, :counter 0, :alias 0}"
                (.-result (.evalSup session root-id "state()")))))
       (testing "Clojure and Superficie evaluate in the same child"
-        (is (= "2" (.-result (.evalClj session child-id "(swap! counter inc)"))))
+        (let [result (.evalClj session child-id "(swap! counter inc)")]
+          (is (= "2" (.-result result)))
+          (is (= "(swap! counter inc)" (.-sourceClj result)))
+          (is (str/includes? (.-sourceSup result) "swap!")))
         (is (= "2" (.-result (.evalSup session child-id "deref(counter)")))))
       (testing "dynamic bindings resolve and unwind inside the selected world"
         (is (= ":inner"

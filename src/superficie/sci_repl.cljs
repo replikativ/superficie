@@ -135,31 +135,47 @@
 ;; Evaluation
 ;; ---------------------------------------------------------------------------
 
+(defn- source-views [language src]
+  (case language
+    :superficie
+    [src (try (core/sup->clj src) (catch :default _ nil))]
+
+    :clojure
+    [(try (core/clj->sup src) (catch :default _ nil)) src]))
+
 (defn- eval-result
   "Evaluate source in ctx as either :superficie or :clojure.
    Returns a JS object with:
      .result  — pr-str of the last form's value (string)
      .output  — captured stdout (print/println calls)
-     .error   — error message string, or null"
+     .error   — error message string, or null
+     .sourceSup / .sourceClj — equivalent prompt views where conversion succeeds"
   [ctx out-buf deadline budget-ms language src]
   (reset! out-buf [])
   (reset! deadline (+ (.now js/Date) budget-ms))
-  (try
-    (let [result (case language
-                   :superficie
-                   (let [forms (expander/expand-forms (core/sup->forms src))]
-                     (reduce (fn [_ form] (sci/eval-form ctx form)) nil forms))
+  (let [[source-sup source-clj] (source-views language src)]
+    (try
+      (let [result (case language
+                     :superficie
+                     (let [forms (expander/expand-forms (core/sup->forms src))]
+                       (reduce (fn [_ form] (sci/eval-form ctx form)) nil forms))
 
-                   :clojure
-                   (sci/eval-string* ctx src))
-          output (str/join @out-buf)]
-      #js {:result (pr-str result) :output output :error nil})
-    (catch :default e
-      #js {:result nil
-           :output (str/join @out-buf)
-           :error  (or (.-message e) (str e))})
-    (finally
-      (reset! deadline nil))))
+                     :clojure
+                     (sci/eval-string* ctx src))
+            output (str/join @out-buf)]
+        #js {:result (pr-str result)
+             :output output
+             :error nil
+             :sourceSup source-sup
+             :sourceClj source-clj})
+      (catch :default e
+        #js {:result nil
+             :output (str/join @out-buf)
+             :error  (or (.-message e) (str e))
+             :sourceSup source-sup
+             :sourceClj source-clj})
+      (finally
+        (reset! deadline nil)))))
 
 (defn- world-description [{:keys [id parent-id label]}]
   #js {:id id :parentId parent-id :label label})

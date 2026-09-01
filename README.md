@@ -533,7 +533,9 @@ quiescent browser REPL does not capture a running call stack:
 `evalClj(worldId, source)` evaluates Clojure syntax in the same runtime. SCI
 contexts remain opaque; browser code addresses worlds by ID. Evaluations have
 a cooperative three-second budget by default, configurable with
-`createForkable({maxRuntimeMs: 1000})`.
+`createForkable({maxRuntimeMs: 1000})`. Evaluation results also contain
+`sourceSup` and `sourceClj`, allowing a browser transcript to switch syntax
+without replaying the prompt.
 
 The [playground](https://replikativ.github.io/superficie/examples/playground.html) includes a live REPL panel using this bundle.
 
