@@ -216,6 +216,40 @@ const examples = [
                   (fn [x] (* x x)))`
   },
   {
+    title: "Anonymous functions: arrows and #()",
+    clojure: `(defn summarize [xs]
+  {:squares (map (fn [x] (* x x)) xs)
+   :total (reduce (fn [acc x] (+ acc x)) 0 xs)
+   :labels (map #(str "item-" %) xs)})`
+  },
+  {
+    title: "Library macros: a raster kernel with indexing",
+    clojure: `(ns demo.heat
+  (:require [raster.core :refer [deftm]]
+            [raster.par :as par]))
+
+(deftm diffuse! [U :- (Array double) V :- (Array double)
+                 W :- Long n :- Long k :- Double] :- Void
+  (par/map-void! i n
+    (aset V i (+ (aget U i)
+                 (* k (- (+ (aget U (- i 1)) (aget U (+ i 1))
+                            (aget U (- i W)) (aget U (+ i W)))
+                         (* 4.0 (aget U i))))))))`
+  },
+  {
+    title: "Library macros: an ansatz definition and theorem",
+    clojure: `(ns demo.lists
+  (:require [ansatz.core :as a]))
+
+(a/defn len [xs :- (List Nat)] Nat
+  (match xs
+    [nil 0]
+    [(cons h t) (+ 1 (len t))]))
+
+(a/theorem add-zero [n :- Nat] (= Nat (+ n 0) n)
+  (simp Nat.add_zero))`
+  },
+  {
     title: "Macros with syntax-quote",
     clojure: "(defmacro unless [pred & body]\n  `(if (not ~pred)\n     (do ~@body)))"
   },

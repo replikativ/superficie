@@ -103,6 +103,13 @@
     (and (seq? x) (= 'new (first x)) (symbol? (second x)) (seq (rest x)))
     (let [[_ class & args] x]
       (apply list (normalize-for-eq (symbol (str class "."))) (map normalize-for-eq args)))
+    ;; #(…): Clojure's reader names its parameters p1__N# with a fresh N on every
+    ;; read; superficie's reader writes %1. Compare them up to those names.
+    (and (seq? x) (superficie.emit.printer/clj-anon-fn x))
+    (normalize-for-eq (superficie.emit.printer/clj-anon-fn x))
+    (reader-conditional? x)
+    (reader-conditional (normalize-for-eq (.-form ^clojure.lang.ReaderConditional x))
+                        (.-splicing ^clojure.lang.ReaderConditional x))
     (seq? x)    (apply list (map normalize-for-eq x))
     (vector? x) (mapv normalize-for-eq x)
     (map? x)    (into {} (map (fn [[k v]] [(normalize-for-eq k) (normalize-for-eq v)]) x))

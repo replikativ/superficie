@@ -97,7 +97,7 @@
       "name": "keyword.operator.superficie"
     },
     "special-form": {
-      "match": "(\\|>|\\.>|:=|=>)",
+      "match": "(\\|>|\\.>|:=|=>|(?<=\\s)->(?=\\s)|^\\s*\\|(?=\\s))",
       "name": "keyword.operator.special.superficie"
     },
     "operator": {

@@ -41,9 +41,12 @@
 
    Shapes are keyed by fully-qualified symbol. Sources, in precedence order:
      1. register-shape!
-     2. :superficie/shape metadata on the var (eval mode, JVM)
-     3. superficie/shapes.edn resources on the classpath (JVM)
-     4. builtin-shapes below"
+     2. :superficie/shape metadata on the var (eval mode, JVM), with
+        :superficie/shape-options for options
+     3. superficie/shapes.edn resources on the classpath (JVM): a map from
+        symbol to a shape vector, or to {:shape [...] :options {...}}
+     4. builtin-shapes below
+   A shape's options (see builtin-options) come from the same source as it."
   #?(:clj (:require [clojure.edn :as edn])))
 
 ;; ---------------------------------------------------------------------------
@@ -73,11 +76,22 @@
 ;;                  than the Java method call (.b A x). For languages embedded
 ;;                  in Clojure data, like ansatz's Lean-style names
 ;;                  (RBTree.node, Nat.succ), whose terms never contain interop.
+;;   :match-arms    inside the block, a match with [pattern body] clauses (ansatz's
+;;                  pattern form) prints as `| pattern => body` arms.
+;;   :index         in the block body, indexing with the given functions:
+;;                  {:get f} prints (f x i j) as x[i, j], and an adjacent `x[i]`
+;;                  reads as (f x i); {:set g} also prints (g x i v) as
+;;                  x[i] <- v. A bare symbol f is {:get f}. raster uses its
+;;                  dispatching aget and aset, so indexing is as polymorphic
+;;                  as they are.
 (def builtin-options
-  '{ansatz.core/defn       {:dotted-calls true}
-    ansatz.core/theorem    {:dotted-calls true}
-    ansatz.core/deftheorem {:dotted-calls true}
-    ansatz.core/inductive  {:dotted-calls true}})
+  '{raster.core/deftm      {:index {:get aget :set aset}}
+    raster.core/ftm        {:index {:get aget :set aset}}
+    raster.par/map-void!   {:index {:get aget :set aset}}
+    ansatz.core/defn       {:dotted-calls true :match-arms true}
+    ansatz.core/theorem    {:dotted-calls true :match-arms true}
+    ansatz.core/deftheorem {:dotted-calls true :match-arms true}
+    ansatz.core/inductive  {:dotted-calls true :match-arms true}})
 
 ;; ---------------------------------------------------------------------------
 ;; Descriptor validation
@@ -112,8 +126,22 @@
 ;; Registry
 ;; ---------------------------------------------------------------------------
 
+(defn valid-options?
+  "True when opts is nil or a map of known options (see builtin-options)."
+  [opts]
+  (or (nil? opts)
+      (and (map? opts)
+           (every? (fn [[k v]]
+                     (case k
+                       (:dotted-calls :match-arms) (boolean? v)
+                       :index (or (symbol? v)
+                                  (and (map? v) (symbol? (:get v))
+                                       (every? #{:get :set} (keys v))
+                                       (every? symbol? (vals v))))
+                       false))
+                   opts))))
+
 (defonce ^:private registered (atom {}))
-(defonce ^:private registered-options (atom {}))
 
 (defn register-shape!
   "Register a shape descriptor (and optional options, see builtin-options)
@@ -124,24 +152,23 @@
      (throw (ex-info "Shapes are keyed by fully-qualified symbols" {:symbol qsym})))
    (when-not (valid-shape? shape)
      (throw (ex-info "Invalid shape descriptor" {:symbol qsym :shape shape})))
-   (swap! registered assoc qsym shape)
-   (if opts
-     (swap! registered-options assoc qsym opts)
-     (swap! registered-options dissoc qsym))
+   (when-not (valid-options? opts)
+     (throw (ex-info "Invalid shape options" {:symbol qsym :options opts})))
+   (swap! registered assoc qsym {:shape shape :options opts})
    qsym))
 
 (defn unregister-shape! [qsym]
   (swap! registered dissoc qsym)
-  (swap! registered-options dissoc qsym)
   nil)
 
-(defn shape-options
-  "Options for a shaped macro, or nil."
-  [qsym]
-  (when (qualified-symbol? qsym)
-    (if (contains? @registered qsym)
-      (get @registered-options qsym)
-      (get builtin-options qsym))))
+#?(:clj
+   (defn- classpath-entry
+     "A shapes.edn value — a shape vector, or {:shape [...] :options {...}} —
+      as {:shape :options}, or nil when invalid."
+     [v]
+     (let [entry (if (map? v) (select-keys v [:shape :options]) {:shape v})]
+       (when (and (valid-shape? (:shape entry)) (valid-options? (:options entry)))
+         entry))))
 
 #?(:clj
    (defn- load-classpath-shapes
@@ -159,8 +186,8 @@
                                   (println "superficie: cannot read" (str url) "-" (ex-message e)))
                                 nil))]
                    (reduce-kv (fn [acc k v]
-                                (if (and (qualified-symbol? k) (valid-shape? v))
-                                  (assoc acc k v)
+                                (if-let [entry (and (qualified-symbol? k) (classpath-entry v))]
+                                  (assoc acc k entry)
                                   (do (binding [*out* *err*]
                                         (println "superficie: ignoring invalid shape for" k "in" (str url)))
                                       acc)))
@@ -180,23 +207,46 @@
                  (concat (keys @registered) (keys @classpath-shapes) (keys builtin-shapes)))))
 
 #?(:clj
-   (defn- var-shape
-     "A valid :superficie/shape from the metadata of an already-loaded var.
-      Never loads code: an unloaded namespace simply has no var shape."
+   (defn- var-entry
+     "{:shape :options} from :superficie/shape and :superficie/shape-options
+      metadata of an already-loaded var. Never loads code: an unloaded
+      namespace simply has no var shape."
      [qsym]
      (when-let [ns (find-ns (symbol (namespace qsym)))]
        (when-let [v (.findInternedVar ^clojure.lang.Namespace ns (symbol (name qsym)))]
-         (let [shape (:superficie/shape (meta v))]
-           (when (valid-shape? shape) shape))))))
+         (let [{shape :superficie/shape opts :superficie/shape-options} (meta v)]
+           (when (and (valid-shape? shape) (valid-options? opts))
+             {:shape shape :options opts}))))))
+
+(defn- shape-entry
+  "{:shape :options} for a fully-qualified symbol from the first source that
+   has a shape: register-shape!, var metadata, shapes.edn, the builtins. The
+   options come with the shape, so a library that ships its own shape also
+   decides its options."
+  [qsym]
+  (when (qualified-symbol? qsym)
+    (or (get @registered qsym)
+        #?(:clj (var-entry qsym))
+        (get @classpath-shapes qsym)
+        (when-let [shape (get builtin-shapes qsym)]
+          {:shape shape :options (get builtin-options qsym)}))))
+
+(defn index-fns
+  "The :index option as {:get f :set g-or-nil}, or nil."
+  [opts]
+  (let [i (:index opts)]
+    (cond (symbol? i) {:get i}
+          (map? i) i)))
 
 (defn shape-for
   "The shape descriptor for a fully-qualified symbol, or nil."
   [qsym]
-  (when (qualified-symbol? qsym)
-    (or (get @registered qsym)
-        #?(:clj (var-shape qsym))
-        (get @classpath-shapes qsym)
-        (get builtin-shapes qsym))))
+  (:shape (shape-entry qsym)))
+
+(defn shape-options
+  "Options for a shaped macro, or nil."
+  [qsym]
+  (:options (shape-entry qsym)))
 
 ;; ---------------------------------------------------------------------------
 ;; Static namespace context: resolve written heads through the file's ns form
