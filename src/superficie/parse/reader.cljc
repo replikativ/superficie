@@ -543,6 +543,16 @@
                   (recur (conj forms form)))))))]
     (wrap-body-lets forms)))
 
+(defn- parse-name-form
+  "Parse a form in a name position (the name of a defn, a method, a shaped
+   macro). A name never opens a block, even when it is a block word: a
+   function may be called `match`."
+  [p]
+  (let [outer @(:no-block p)]
+    (vreset! (:no-block p) true)
+    (try (parse-form p)
+         (finally (vreset! (:no-block p) outer)))))
+
 (defn- parse-defn-arities
   "Parse arity bodies for defn/defmacro: [params] body... repeated until 'end'.
    Returns vector of [params body...] vectors (one per arity)."
@@ -572,7 +582,7 @@
    Optionally: defn name \"docstring\" {attr-map} [params]: body end
    name may be any form (symbol, #?(...) reader conditional, etc.)"
   [p form-sym tok]
-  (let [name-sym (parse-form p)
+  (let [name-sym (parse-name-form p)
         ;; Optional docstring
         docstring (when (tok-type? (ppeek p) :string)
                     (let [ds (:value (ppeek p))]
@@ -1063,7 +1073,7 @@
    Returns: (name [params] body...)
    name may be any form (symbol, #?(...) reader conditional, etc.)"
   [p tok]
-  (let [name-sym (parse-form p)
+  (let [name-sym (parse-name-form p)
         _         (when-not (tok-type? (ppeek p) :open-bracket)
                     (errors/reader-error "Expected '[params]' in method implementation"
                                          (error-data p (select-keys tok [:line :col]))))
@@ -1247,30 +1257,32 @@
         (when (shapes/shape-for qsym) :shape-block))))
 
 (defn- header-colon-on-line?
-  "Scan ahead for the ':' that ends a shape-block header. The header must stay
-   on the head's line except inside brackets, so a header whose ':' is missing
-   never borrows the ':' of a later block. A token's end line counts, so a
-   multi-line docstring may precede the rest of the header. Stops at closers
-   and 'end'."
+  "Scan ahead for the ':' that ends a shape-block header. The header stays on
+   the head's line except inside brackets and next to a docstring (a line may
+   break before or after a string), so a header whose ':' is missing never
+   borrows the ':' of a later block. A token's end line counts, so a multi-line
+   docstring may precede the rest of the header. Stops at closers and 'end'."
   [p]
   (let [{:keys [tokens pos]} p
         start @pos
-        head-line (:line (nth tokens (dec start) nil))]
-    (loop [i start depth 0 prev-line head-line]
-      (let [tok (nth tokens i nil)]
+        head-tok (nth tokens (dec start) nil)]
+    (loop [i start depth 0 prev-line (:line head-tok) prev-string? false]
+      (let [tok (nth tokens i nil)
+            line-of (fn [t] (or (:end-line t) (:line t) prev-line))]
         (cond
           (nil? tok) false
           (zero? depth)
           (cond
-            (and prev-line (:line tok) (not= prev-line (:line tok))) false
+            (and prev-line (:line tok) (not= prev-line (:line tok))
+                 (not prev-string?) (not (tok-type? tok :string))) false
             (colon-tok? tok) true
             (and (tok-type? tok :symbol) (str/ends-with? (:value tok) ":")
                  (not= ":" (:value tok))) true
             (closer-types (:type tok)) false
             (end-symbol? tok) false
             (#{:open-paren :open-bracket :open-brace :open-set :open-anon-fn} (:type tok))
-            (recur (inc i) 1 (or (:end-line tok) (:line tok) prev-line))
-            :else (recur (inc i) 0 (or (:end-line tok) (:line tok) prev-line)))
+            (recur (inc i) 1 (line-of tok) false)
+            :else (recur (inc i) 0 (line-of tok) (tok-type? tok :string)))
           :else
           ;; Closers synthesized by the grouper carry no :line — keep the last known one.
           (recur (inc i)
@@ -1278,7 +1290,8 @@
                    (#{:open-paren :open-bracket :open-brace :open-set :open-anon-fn} (:type tok)) (inc depth)
                    (closer-types (:type tok)) (dec depth)
                    :else depth)
-                 (or (:end-line tok) (:line tok) prev-line)))))))
+                 (line-of tok)
+                 false))))))
 
 (defn- shape-start?
   "True when the tokens after a shaped head form a block header: the first
@@ -1490,6 +1503,7 @@
   [p form-sym qsym tok]
   (let [shape (shapes/shape-for qsym)
         loc (select-keys tok [:line :col])
+        name-first? (= :name (shapes/first-slot shape))
         header (loop [header []]
                  (cond
                    (peof? p)
@@ -1497,7 +1511,9 @@
                                         (error-data p (assoc loc :incomplete true)))
                    (colon-tok? (ppeek p)) (do (padvance! p) header)
                    :else
-                   (let [f (parse-form p)]
+                   (let [f (if (and name-first? (empty? header))
+                             (parse-name-form p)
+                             (parse-form p))]
                      (cond
                        (discard-sentinel? f) (recur header)
                        (and (or (symbol? f) (keyword? f))
@@ -1621,8 +1637,13 @@
    - Chain extension: (and ... (< b c)) < d → (and ... (< b c) (< c d))
    qsym is the qualified registry key; output forms use (symbol (name qsym))."
   [qsym entry left right]
-  (let [op (symbol (name qsym))]
+  (let [op (symbol (name qsym))
+        grouped? (:sup/grouped (meta left))]
     (cond
+      ;; A parenthesized left operand stays one operand
+      grouped?
+      (list op left right)
+
       ;; Variadic flattening: (+ a b) + c → (+ a b c)
       (and (:variadic entry)
            (seq? left) (= (first left) op))
@@ -1851,7 +1872,9 @@
           :else
           (let [inner (parse-expr p)]
             (if (tok-type? (ppeek p) :close-paren)
-              (do (padvance! p) inner)
+              (do (padvance! p)
+                  ;; a group is one operand: no flattening or chaining across it
+                  (if (seq? inner) (vary-meta inner assoc :sup/grouped true) inner))
               (errors/reader-error
                "Parenthesized group must contain a single expression — use f(args) for calls"
                (error-data p loc))))))

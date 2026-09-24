@@ -109,7 +109,9 @@
 (def internal-meta-keys
   "Pipeline-internal metadata keys — not emitted by the printer."
   #{:line :column :end-line :end-column :file :ws
-    :sup/sugar :sup/order :sup/ns :sup/meta-chain})
+    :sup/sugar :sup/order :sup/ns :sup/meta-chain
+    ;; set on a parenthesized group, so (a + b) + c and (a < b) = x keep their shape
+    :sup/grouped})
 
 (defn strip-internal-meta
   "Return m with all internal pipeline keys removed."

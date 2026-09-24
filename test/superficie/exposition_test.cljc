@@ -58,8 +58,8 @@
                 (defn f "First line.\n  Second line." [x] x)
                 (deftm g "Doc.\n  More." [x :- Long] :- Long x)]
         out (core/pprint-sup forms)]
-    (is (str/includes? out "defn f \"First line.\n  Second line.\" [x]:"))
-    (is (str/includes? out "deftm g \"Doc.\n  More.\" [x :- Long] :- Long:"))
+    (is (str/includes? out "defn f\n    \"First line.\n  Second line.\"\n    [x]:"))
+    (is (str/includes? out "deftm g\n    \"Doc.\n  More.\"\n    [x :- Long] :- Long:"))
     (is (roundtrips? forms))))
 
 (deftest test-long-let-one-binding-per-line
@@ -86,4 +86,34 @@
     (testing "outside ansatz blocks, A.b(x) is still a method call"
       (is (str/includes? out "  s.toUpperCase()"))
       (is (str/includes? out "def t: (RBTree.node)(Nat)")))
+    (is (roundtrips? forms))))
+
+(deftest test-nested-comparisons-and-grouping
+  (testing "comparisons chain, so a comparison operand of a comparison is grouped"
+    (is (= "(a > b) not= (c > d)" (core/forms->sup ['(not= (> a b) (> c d))])))
+    (is (roundtrips? '[(and (not= (> yi y) (> yj y)) (< x (+ xi 1)))])))
+  (testing "a parenthesized group is one operand: no chaining or flattening across it"
+    (is (= '[(= (> a b) x)] (core/sup->forms "(a > b) = x")))
+    (is (= '[(and (< a b) (< b c))] (core/sup->forms "a < b < c")))
+    (is (= '[(* (* a b) c)] (core/sup->forms "(a * b) * c")))
+    (is (= '[(* a b c)] (core/sup->forms "a * b * c"))))
+  (testing "nested same-op arithmetic keeps its shape"
+    (is (= "(a * b) * c" (core/forms->sup ['(* (* a b) c)])))
+    (is (roundtrips? '[(* (* a b) c) (and (and a b) c) (+ a b c)]))))
+
+(deftest test-builtin-tagged-literals
+  (is (uuid? (first (core/sup->forms "#uuid \"7c1a2e3e-9b1c-4d6a-8f0e-c17900000001\""))))
+  (is (inst? (first (core/sup->forms "#inst \"2026-09-25T00:00:00Z\"")))))
+
+(deftest test-block-word-as-a-name
+  (testing "a function may be called match"
+    (is (roundtrips? '[(defn match "Doc." [x] (inc x))]))))
+
+(deftest test-docstring-header-layout
+  (let [forms '[(ns demo (:require [raster.core :refer [deftm]]))
+                (deftm weight "The power kernel.\n  A second line." [att :- Double d :- Double] :- Double (* att d))
+                (defn f "First.\n  Second." [x] x)]
+        out (core/pprint-sup forms)]
+    (is (str/includes? out "deftm weight\n    \"The power kernel.\n  A second line.\"\n    [att :- Double d :- Double] :- Double:"))
+    (is (str/includes? out "defn f\n    \"First.\n  Second.\"\n    [x]:"))
     (is (roundtrips? forms))))
