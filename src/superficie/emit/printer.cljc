@@ -325,7 +325,9 @@
       ;; single arity with vector params
       (and (seq rest2) (vector? (first rest2)))
       (let [[params & body] rest2]
-        (if (= 1 (count body))
+        (if (and (= 1 (count body))
+                 ;; only a body that stays on one line reads well inline
+                 (not (str/includes? (print-form (first body)) "\n")))
           ;; single-expression body: inline, delimited by `end` so it stays
           ;; unambiguous on one line (no indentation-sensitivity needed).
           (str prefix " " (print-form params) ": " (print-form (first body)) " end")
