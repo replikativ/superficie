@@ -201,7 +201,7 @@
    behind a sigil (' @ # ~ ^) or metadata."
   [expr-str]
   (when-let [[_ _ word] (re-find #"(^|[\s(\[{,])([A-Za-z_*!?<>=+$%&|][A-Za-z0-9_*!?<>=+$%&|'#/-]*|-[A-Za-z_*!?<>=+$%&|][A-Za-z0-9_*!?<>=+$%&|'#/-]*)$"
-                                      expr-str)]
+                                 expr-str)]
     (and (not (str/includes? word "."))
          (not (str/ends-with? word "/"))
          (not (contains? reserved-words word))
@@ -252,8 +252,8 @@
   (let [inner (str *indent* "  ")]
     (binding [*indent* inner]
       (str/join "\n" (map #(str inner (if *body-form-printer*
-                                         (*body-form-printer* % (count inner))
-                                         (print-form %)))
+                                        (*body-form-printer* % (count inner))
+                                        (print-form %)))
                           forms)))))
 
 (defn- print-defn-block [head args]

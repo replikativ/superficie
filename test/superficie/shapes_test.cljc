@@ -49,8 +49,8 @@
 
 (deftest test-ns-context
   (let [ctx (shapes/ns-context '(ns x (:require [raster.core :refer [deftm]]
-                                                 [ansatz.core :as a]
-                                                 (raster [par :as p]))))]
+                                                [ansatz.core :as a]
+                                                (raster [par :as p]))))]
     (is (= 'raster.core/deftm (shapes/resolve-static 'deftm ctx)))
     (is (= 'ansatz.core/defn (shapes/resolve-static 'a/defn ctx)))
     (is (= 'raster.par/map-void! (shapes/resolve-static 'p/map-void! ctx)))
