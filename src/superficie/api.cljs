@@ -11,9 +11,11 @@
    (core/clj->sup source (js->clj opts :keywordize-keys true))))
 
 (defn ^:export toClj
-  "Convert a superficie source string to Clojure source. Returns a string."
-  [source]
-  (core/sup->clj source))
+  "Convert a superficie source string to Clojure source. Returns a string.
+   Optional opts object: {context: \"(require '[raster.core :refer [deftm]])\"}."
+  ([source] (core/sup->clj source))
+  ([source opts]
+   (core/sup->clj source (js->clj opts :keywordize-keys true))))
 
 (defn ^:export supToForms
   "Parse a superficie source string, return forms as a JS array of EDN strings."

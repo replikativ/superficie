@@ -156,3 +156,9 @@
     (testing "the context supplies the requires the fragment assumes"
       (is (= "deftm weight [att :- Double d :- Double] :- Double:\n  att * d\nend"
              (core/clj->sup snip {:context "(require '[raster.core :refer [deftm]])"}))))))
+
+(deftest test-snippet-context-reads-back
+  (let [ctx "(require '[raster.core :refer [deftm]])"
+        snip "(deftm weight [att :- Double] :- Double (* att att))"
+        out (core/clj->sup snip {:context ctx})]
+    (is (= (core/clj->forms snip) (core/sup->forms out {:context ctx})))))

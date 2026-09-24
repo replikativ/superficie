@@ -23,15 +23,21 @@
 ;; Text-to-form track
 ;; ---------------------------------------------------------------------------
 
+(declare context-from-source)
+
 (defn sup->forms
   "Read a superficie source string, return a vector of Clojure forms.
    opts map:
      :resolve-keyword — fn that resolves auto-resolve keyword strings (\"::foo\")
                         to keywords at read time. Required on CLJS.
      :read-cond       — :preserve to return ReaderConditional objects instead of
-                        evaluating for the current platform."
+                        evaluating for the current platform.
+     :context         — Clojure ns/require forms the snippet assumes (as for clj->sup)."
   ([s] (:forms (pipeline/run s)))
-  ([s opts] (:forms (pipeline/run s opts))))
+  ([s opts]
+   (:forms (pipeline/run s (cond-> (dissoc opts :context)
+                             (:context opts)
+                             (assoc :ns-context (context-from-source (:context opts))))))))
 
 (defn forms->sup
   "Print Clojure forms as a superficie source string (single-line per form)."
