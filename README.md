@@ -295,7 +295,7 @@ defmacro -> [x & forms]:
 end
 ```
 
-User-defined macros are called with function syntax (`unless(pred, body)`). Block syntax (`unless pred: body end`) is reserved for macros registered in the block registry — either built-in forms or library macros that explicitly declare their surface block kind via `:superficie/role` metadata.
+User-defined macros are called with function syntax (`unless(pred, body)`). Block syntax (`unless pred: body end`) is reserved for macros registered in the block registry — either built-in forms or library macros that declare a [shape](#shapes-for-library-macros) (or, for the built-in block kinds, a `:superficie/role`).
 
 ### Function Call Fallback
 
@@ -337,14 +337,25 @@ The key design choice is the **two-phase bracket / semantic split**:
 
 - The **grouper** resolves bracket structure and reports *all* structural
   errors without aborting. `f(x]` produces `(f x)` with an attached
-  `ShrubError`; the surrounding code is still parsed correctly.
+  `ShrubError`; the surrounding code is still parsed correctly. Reading
+  (`sup->forms`) reports the first structural error at its location;
+  `pipeline/run-resilient` returns the healed forms together with the errors.
 - The **reader** handles semantics: block keywords, operator precedence,
   and namespace resolution. Semantic errors throw `ex-info` with
   structured `:line`, `:col`, `:source-context`, and `:hint` data.
 
 This is the same separation Rust's compiler and Racket's Rhombus use: construct the bracket/token tree first (where recovery is mechanical), then parse semantics against a structurally valid input.
 
-Error messages are formatted with source context and underlines:
+Error messages are formatted with source context and underlines. Block errors carry a hint from indentation or from a header whose `:` is missing, and evaluation adds hints for common slips such as `W-1` (read as one name; write `W - 1`), `True`, `None`, `elif` and `return`:
+
+```
+Error: Unexpected 'end' — no block is open here (line 3, col 1)
+3 | end
+  | ^
+1 | defn f [x]
+  | ^ header without ':'
+Hint: `defn` at line 1 was read as a plain symbol, not a block: its header needs ':' at the end of the line
+```
 
 ```
 Error: Expected 'end' to close defn block (line 2, col 7)
@@ -369,6 +380,45 @@ Each `block-dispatch` entry maps a surface keyword (`"defn"`, `"if"`, `"for"`, �
 On the JVM, superficie maintains a **block registry**: when you evaluate a form, the printer records which Clojure vars have surface block representations. This lets the renderer correctly handle project-specific `def`-like macros — if your project defines `defcomponent`, the renderer can be told it uses the `defn` block pattern.
 
 The registry is populated by `superficie.runtime/register-ns!` and updated incrementally via the REPL.
+
+### Shapes for library macros
+
+A **shape** tells superficie how a library macro's arguments split into a block header and a body. Superficie ships shapes for raster and ansatz:
+
+```
+;; (deftm norm [x :- Double, y :- Double] :- Double (sqrt (+ (* x x) (* y y))))
+deftm norm [x :- Double y :- Double] :- Double:
+  sqrt(x * x + y * y)
+end
+
+;; (a/theorem add-zero [n :- Nat] (= Nat (+ n 0) n) (simp Nat.add_zero))
+a/theorem add-zero [n :- Nat] =(Nat, n + 0, n):
+  simp(Nat.add_zero)
+end
+```
+
+A shape is a vector of slots, keyed by the macro's fully-qualified symbol:
+
+```clojure
+'{raster.core/deftm [:name :doc? [:wrap? All 1] :params [:kw? :-] :body]
+  ansatz.core/theorem [:name :params :form :body]}
+```
+
+| Slot | Meaning |
+|------|---------|
+| `:name`, `:form` | one required form |
+| `:params` | one required vector |
+| `:doc?`, `:attr?` | an optional string / map |
+| `:form?` | an optional form, taken only when a body form remains |
+| `[:kw? K]` | an optional `K form` pair, e.g. `:- Ret` |
+| `[:wrap? S n]` | lift a trailing `(S a1..an …)` into the header, e.g. raster's `(All [T] …)` |
+| `:body` | the remaining forms (last slot) |
+
+A shape can also carry options. With `{:dotted-calls true}` — set for ansatz's `a/defn`, `a/theorem` and `a/inductive` — `A.b(x)` inside the block is the plain call `(A.b x)` instead of the Java method call `(.b A x)`, so Lean-style names read naturally: `Nat.succ(n)`, `RBTree.node(Nat, …)`. A Java call inside such a block prints in the explicit form `.toUpperCase(s)`. The option applies only where the form is written as a block, which the reader and printer both know from the head.
+
+Register a shape with `superficie.shapes/register-shape!` (`(register-shape! qsym shape opts)` for options), as `:superficie/shape` metadata on the macro var, or in a `superficie/shapes.edn` resource that a library ships on its classpath.
+
+Shapes are safe by construction. The reader needs no shape to parse a block: the header is everything between the head and `:`, the body everything up to `end`. The printer uses a shape only after checking that reading the block back gives the original form, and otherwise falls back to call syntax. Heads resolve through the file's `ns` form (`a/defn` with `[ansatz.core :as a]`, a referred `deftm`) the same way in the reader and the printer, and a head is always written back exactly as it appeared. A block header must stay on one line, except inside brackets, so a header whose `:` is missing never borrows the `:` of a later block.
 
 ### Interleaving with Clojure Evaluation
 
@@ -538,13 +588,13 @@ ln -s /path/to/superficie/editors/vscode ~/.vscode/extensions/superficie
 
 ## Status
 
-Superficie roundtrips **596 / 699 files (85%)** across 14 real-world Clojure projects including [core.async](https://github.com/clojure/core.async), [Datahike](https://github.com/replikativ/datahike), [Onyx](https://github.com/onyx-platform/onyx), [Clara Rules](https://github.com/oracle-samples/clara-rules), [Malli](https://github.com/metosin/malli), and [others](#tested-projects).
+Superficie roundtrips **643 / 743 files (87%)** across 13 real-world Clojure projects including [core.async](https://github.com/clojure/core.async), [Datahike](https://github.com/replikativ/datahike), [Onyx](https://github.com/onyx-platform/onyx), [Clara Rules](https://github.com/oracle-samples/clara-rules), [Malli](https://github.com/metosin/malli), and [others](#tested-projects), and **408 / 435 files (94%)** of [raster](https://github.com/replikativ/raster) and [ansatz](https://github.com/replikativ/ansatz) (sources and examples). The check is exact: operator symbols must come back unchanged, so `clojure.core/*` and a referred `raster.numeric/*` stay distinct.
 
-Printing Clojure as superficie always succeeds. The ~15% that don't fully roundtrip fall into a few categories, all of which are design constraints rather than bugs:
+Printing Clojure as superficie always succeeds. What does not roundtrip falls into a few categories:
 
 - **Auto-resolved keywords** (`::alias/key`, `#::alias{…}`) — these require namespace context at read time
-- **Block keyword names used as variables** — `match`, `when`, `let`, etc. are reserved as block syntax in superficie; Clojure code that uses them as plain variable names can't round-trip
-- **Operators in unusual positions** — operator symbols in `:exclude` lists, pattern literals, etc.
+- **Nested arithmetic of one operator** — `(* (* a b) c)` prints as `a * b * c`, which reads back as `(* a b c)`: the same value, a different form
+- **Block keyword names used as variables** in some positions — e.g. a local named `match` or `when` directly before a block
 
 Code written *in* superficie — which naturally avoids these patterns — roundtrips cleanly.
 
@@ -553,20 +603,21 @@ Code written *in* superficie — which naturally avoids these patterns — round
 
 | Project | Files | Pass | Notes |
 |---------|-------|------|-------|
-| Proximum | 23 | 23 | |
-| Datahike | 69 | 65 | |
-| Stratum | 28 | 26 | |
-| core.async | 45 | 41 | `::alias/key` |
-| Malli | 32 | 12 | `::alias/key` |
-| Datascript | 11 | 10 | |
+| Proximum | 26 | 26 | |
+| Datahike | 83 | 77 | |
+| Stratum | 45 | 40 | |
+| core.async | 37 | 35 | `::alias/key` |
+| Malli | 32 | 15 | `::alias/key` |
+| Datascript | 18 | 12 | |
 | Clara Rules | 74 | 65 | `::alias/key` |
-| SCI | 43 | 24 | `::alias/key` |
-| Konserve | 16 | 15 | |
+| SCI | 47 | 25 | `::alias/key` |
+| Konserve | 23 | 21 | |
 | rewrite-clj | 52 | 49 | |
-| Babashka | 65 | 55 | |
-| Electric | 52 | 35 | |
+| Babashka | 65 | 58 | |
 | Onyx | 134 | 133 | |
-| Datalevin | 55 | 43 | |
+| Datalevin | 107 | 87 | |
+| raster | 352 | 328 | sources and examples |
+| ansatz | 83 | 80 | sources and examples |
 
 </details>
 

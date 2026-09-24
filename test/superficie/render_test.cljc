@@ -121,7 +121,7 @@
          (p/print-form '(when (> x 0) (println "pos"))))))
 
 (deftest test-case
-  (is (= "case x :\n  1 => \"one\"\n  2 => \"two\"\n  => \"default\"\nend"
+  (is (= "case x:\n  1 => \"one\"\n  2 => \"two\"\n  => \"default\"\nend"
          (p/print-form '(case x 1 "one" 2 "two" "default")))))
 
 (deftest test-try

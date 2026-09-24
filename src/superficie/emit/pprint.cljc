@@ -16,13 +16,10 @@
 (def ^:private indent-step 2)
 
 (defn- block-form?
-  "True if head is a block form (defn, if, let, etc.) that the printer
-   handles with block syntax."
+  "True if head is a block form (defn, if, let, a shaped macro, etc.) that
+   the printer handles with block syntax."
   [head]
-  (when (symbol? head)
-    (or (get @printer/block-dispatch head)
-        (when (nil? (namespace head))
-          (get @printer/block-dispatch (symbol "clojure.core" (name head)))))))
+  (some? (printer/block-kind-for head)))
 
 ;; ---------------------------------------------------------------------------
 ;; Core helpers
@@ -235,11 +232,19 @@
 ;; Collection formatting
 ;; ---------------------------------------------------------------------------
 
+(defn- pp-elem
+  "Pretty-print a collection element. A bare `new` is followed by a comma so
+   `[new List(x)]` cannot read as the constructor call `new List(x)`."
+  [item col width]
+  (if (= 'new item) "new," (pp item col width)))
+
 (defn- pp-vec
   "Pretty-print a vector."
   [form col width]
   (let [flat-str (flat form)]
-    (if (<= (+ col (count flat-str)) width)
+    (if (or (<= (+ col (count flat-str)) width)
+            ;; operator elements need the flat printer's commas
+            (some printer/operator-arg? form))
       flat-str
       (let [inner-col (inc col)
             inner-indent (indent-str inner-col)
@@ -247,7 +252,7 @@
             src-col (when (meta form) (:column (meta form)))]
         (str "["
              (render-items items inner-col inner-indent width
-                           (fn [item c w] (pp item c w))
+                           pp-elem
                            identity
                            src-col)
              "]")))))
@@ -262,13 +267,14 @@
         val-col (if multi-line?
                   (+ (count last-line) 1)
                   (+ col (count last-line) 1))]
-    (str pp-k " " (pp v val-col width))))
+    (str pp-k (if (= 'new k) ", " " ") (pp v val-col width))))
 
 (defn- pp-map
   "Pretty-print a map."
   [form col width]
   (let [flat-str (flat form)]
-    (if (<= (+ col (count flat-str)) width)
+    (if (or (<= (+ col (count flat-str)) width)
+            (some printer/operator-arg? (mapcat identity form)))
       flat-str
       (let [inner-col (inc col)
             inner-indent (indent-str inner-col)
@@ -285,14 +291,16 @@
   "Pretty-print a set."
   [form col width]
   (let [flat-str (flat form)]
-    (if (<= (+ col (count flat-str)) width)
+    (if (or (<= (+ col (count flat-str)) width)
+            ;; operator elements need the flat printer's commas
+            (some printer/operator-arg? form))
       flat-str
       (let [inner-col (+ col 2)  ; after #{
             inner-indent (indent-str inner-col)
             items (vec form)]
         (str "#{"
              (render-items items inner-col inner-indent width
-                           (fn [item c w] (pp item c w))
+                           pp-elem
                            identity)
              "}")))))
 
@@ -333,7 +341,7 @@
         (if (<= (+ col (count flat-str)) width)
           flat-str
           (let [prefix (str (name head) " " (flat name-sym)
-                            (when docstring (str " " (pr-str docstring)))
+                            (when docstring (str " " (printer/print-docstring docstring)))
                             ": ")]
             (str prefix (pp (first rest2) (+ col (count prefix)) width))))))))
 
@@ -343,15 +351,17 @@
   [form col width]
   (let [head (first form)
         args (rest form)
-        head-str (flat head)
+        head-str (printer/call-head-str head)
         flat-str (flat form)]
     (cond
       ;; No args
       (empty? args)
       (str head-str "()")
 
-      ;; Fits flat
-      (<= (+ col (count flat-str)) width)
+      ;; Fits flat — or has an operator-symbol argument, which only the flat
+      ;; printer knows how to protect from being read as infix
+      (or (<= (+ col (count flat-str)) width)
+          (some printer/operator-arg? args))
       flat-str
 
       ;; Multi-line
@@ -491,7 +501,10 @@
 
                     ;; 'quote — always use shorthand
                     (and (call? form) (= 'quote (first form)) (= 2 (count form)))
-                    (str "'" (pp (second form) (inc col) width))
+                    (if (printer/quoted-as-sexp? (second form) (subs (flat form) 1))
+                      (flat form)
+                      (str "'" (binding [printer/*in-quote* true]
+                                 (pp (second form) (inc col) width))))
 
                     ;; #'var — always use shorthand
                     (and (call? form) (= 'var (first form)) (= 2 (count form)))
@@ -514,8 +527,12 @@
                     (pp-call-smart form col width)
 
                     ;; Syntax-quote / unquote / unquote-splicing AST nodes
+                    ;; `a + b would syntax-quote only a — the flat printer
+                    ;; writes such an inner form as a call
                     (forms/syntax-quote? form)
-                    (str "`" (pp (:form form) (inc col) width))
+                    (if (printer/infix-form? (:form form))
+                      (flat form)
+                      (str "`" (pp (:form form) (inc col) width)))
 
                     (forms/unquote? form)
                     (str "~" (pp (:form form) (inc col) width))
@@ -556,7 +573,9 @@
   ([form] (pprint-form form nil))
   ([form opts]
    (let [width (or (:width opts) default-width)]
-     (pp form 0 width))))
+     (binding [printer/*width* width
+               printer/*body-form-printer* (fn [f col] (pp f col width))]
+       (pp form 0 width)))))
 
 (defn- form-separator
   "Determine the separator between two consecutive forms based on :line metadata.
@@ -583,7 +602,7 @@
    (let [trailing-ws (:trailing-ws (meta forms))
          trailing-comments (when trailing-ws
                              (extract-comments trailing-ws))
-         rendered (mapv #(pprint-form % opts) forms)
+         rendered (printer/map-in-ns-context #(pprint-form % opts) forms)
          body (if (<= (count rendered) 1)
                 (str/join rendered)
                 (let [pairs (map vector forms (rest forms))
