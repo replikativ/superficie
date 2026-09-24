@@ -121,6 +121,21 @@ anon-fn = 'fn' fn-name? params ':' body 'end'
 
 `fn` is used for anonymous functions (Clojure's `fn`), while `defn` is used for named definitions (Clojure's `defn`).
 
+Two shorter forms:
+
+```
+arrow-fn = (symbol | '(' symbol (',' symbol)* ')') ' -> ' expr   ;; spaces around -> required
+short-fn = '#(' expr ')'                                         ;; parameters %, %1, %2, %&
+```
+
+```clojure
+map(x -> x * x, xs)                   ;; (map (fn [x] (* x x)) xs)
+reduce((acc, x) -> acc + x, 0, xs)    ;; (reduce (fn [acc x] (+ acc x)) 0 xs)
+map(#(inc(%)), xs)                    ;; (map #(inc %) xs)
+```
+
+The arrow binds loosest: its body extends to the next `,` or closing bracket. The printer uses it only for call arguments with plain parameter names and a one-line body.
+
 ## Block Expressions
 
 All blocks follow the pattern `keyword ... ':' body 'end'`:
@@ -186,6 +201,41 @@ new HashMap(16)    ;; (HashMap. 16)
 ```
 
 Method calls and field access are postfix on the object. Constructors use the `new` keyword.
+
+## Indexing in shaped blocks
+
+Inside the body of a block whose shape has the `:index f` option (raster's `deftm`, `ftm` and `par/map-void!` use `aget`), a `[` directly after an expression, with no space, indexes it:
+
+```clojure
+U[i]           ;; (aget U i)
+U[i, j]        ;; (aget U i j)
+f(U)[i - 1]    ;; (aget (f U) (- i 1))
+```
+
+With `:index {:get aget :set aset}`, `<-` stores into an index:
+
+```clojure
+U[i] <- 2.0 * U[i]      ;; (aset U i (* 2.0 (aget U i)))
+1 + (U[0] <- 1)          ;; a store inside an expression is parenthesized
+```
+
+Elsewhere, and in block headers, `x[i]` is the two forms `x` and `[i]`.
+
+## Let statements
+
+In a block body, `x := v` binds `x` for the rest of the body; consecutive statements form one `let`:
+
+```clojure
+defn step [s]:
+  log(s)
+  v := velocity(s)
+  x := v * 2
+  f(x)
+end
+;; (defn step [s] (log s) (let [v (velocity s) x (* v 2)] (f x)))
+```
+
+Only a statement can bind, and `:=` must follow the name on the same line; anywhere else `:=` is the keyword (`[x := y]`). At top level, use `def`.
 
 ## Pipe Operators
 

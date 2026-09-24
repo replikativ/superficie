@@ -323,7 +323,9 @@
    'do 0,
    'ns 1,
    '-> 1, '->> 1, 'some-> 1, 'some->> 1, 'as-> 2,
-   'deftest 1, 'testing 1, 'is 0, 'are 0})
+   'deftest 1, 'testing 1, 'is 0, 'are 0,
+   ;; array and index stay with the head, the stored value breaks
+   'aset 2})
 
 (def ^:private def-heads
   #{'def 'defonce 'defmulti
@@ -420,6 +422,16 @@
                            (str out "\n" indent op " " r)
                            (end-col r c))))))))))))
 
+(defn- flat-arg
+  "A call argument printed flat: there a lambda may print as `x -> body`."
+  [item]
+  (binding [printer/*arrow-ok* true] (flat item)))
+
+(defn- pp-arg
+  "Pretty-print a call argument: there a lambda may print as `x -> body`."
+  [item col width]
+  (binding [printer/*arrow-ok* true] (pp item col width)))
+
 (defn- pp-call-smart
   "Pretty-print a call, keeping leading args with the head when appropriate.
    Uses line-hints for arg placement when available, fill otherwise."
@@ -455,20 +467,20 @@
           ;; Head-line args fit on the first line
           (and head-args
                (<= (+ col (count head-str) 1
-                      (count (str/join ", " (map flat head-args))))
+                      (count (str/join ", " (map flat-arg head-args))))
                    width))
-          (let [head-args-str (str/join ", " (map flat head-args))
+          (let [head-args-str (str/join ", " (map flat-arg head-args))
                 first-line (str head-str "(" head-args-str)
                 body-vec (vec body-args)]
             (str first-line ",\n" inner-indent
                  (render-items body-vec inner-col inner-indent width
-                               (fn [item c w] (pp item c w))
+                               pp-arg
                                identity nil ",")
                  ")"))
 
           ;; Unknown calls (not in head-line-args): try first arg on head line
           (nil? n-head-args)
-          (let [first-arg-str (pp (first all-args) (+ col (count head-str) 1) width)
+          (let [first-arg-str (pp-arg (first all-args) (+ col (count head-str) 1) width)
                 first-line (first (str/split-lines first-arg-str))
                 first-line-len (+ col (count head-str) 1 (count first-line))]
             (if (<= first-line-len width)
@@ -479,18 +491,18 @@
                     ;; A single multi-line collection reads far cleaner on its
                     ;; own line at a shallow indent than staircased after the
                     ;; call head. Re-render it at inner-col.
-                    (str head-str "(\n" inner-indent (pp a inner-col width) ")")
+                    (str head-str "(\n" inner-indent (pp-arg a inner-col width) ")")
                     (str head-str "(" first-arg-str ")")))
                 (let [rest-args (vec (rest all-args))]
                   (str head-str "(" first-arg-str ",\n" inner-indent
                        (render-items rest-args inner-col inner-indent width
-                                     (fn [item c w] (pp item c w))
+                                     pp-arg
                                      identity nil ",")
                        ")")))
               ;; First arg doesn't fit — all in body
               (str head-str "(\n" inner-indent
                    (render-items all-args inner-col inner-indent width
-                                 (fn [item c w] (pp item c w))
+                                 pp-arg
                                  identity nil ",")
                    ")")))
 
@@ -498,7 +510,7 @@
           :else
           (str head-str "(\n" inner-indent
                (render-items all-args inner-col inner-indent width
-                             (fn [item c w] (pp item c w))
+                             pp-arg
                              identity nil ",")
                ")"))))))
 
@@ -550,8 +562,18 @@
                    (str "^" (flat m)))]
       {:prefix prefix :stripped (with-meta form nil)})))
 
+(declare pp*)
+
 (defn- pp
-  "Pretty-print a form at the given column and width."
+  "Pretty-print a form at the given column and width. Only a call argument
+   itself may print as a lambda arrow; the forms inside it may not."
+  [form col width]
+  (if (or (and printer/*arrow-ok* (seq? form) (= 'fn (first form)))
+          (printer/store-form? form))
+    (pp* form col width)
+    (binding [printer/*arrow-ok* false printer/*stmt-ok* false] (pp* form col width))))
+
+(defn- pp*
   [form col width]
   (let [comments (form-comments form)
         indent (indent-str col)
@@ -596,6 +618,23 @@
 
                     (and (call? form) (symbol? (first form)) (block-form? (first form)))
                     (binding [printer/*indent* (indent-str col)] (flat form))
+
+                    ;; x[i] — indexing prints flat
+                    (and (call? form) (printer/index-form? form))
+                    (flat form)
+
+                    ;; x[i] <- v — the value breaks after the arrow when long
+                    (and (call? form) (printer/store-form? form))
+                    (let [f (flat form)]
+                      (if (<= (+ col (count f)) width)
+                        f
+                        (let [bare? (binding [printer/*stmt-here* printer/*stmt-ok*
+                                              printer/*arrow-here* printer/*arrow-ok*]
+                                      (printer/store-bare?))
+                              [target v] (printer/store-parts form)
+                              open (if bare? "" "(")
+                              lhs (str open target " <- ")]
+                          (str lhs (pp v (+ col (count lhs)) width) (if bare? "" ")")))))
 
                     ;; Infix that does not fit — break before operators
                     (and (call? form) (printer/infix-form? form)

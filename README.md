@@ -192,6 +192,22 @@ users |> filter(:active) |> map(:name) |> sort() |> take(10)
 config .> assoc(:port, 8080) .> merge(defaults)
 ```
 
+### Anonymous Functions
+
+```
+;; a one-line fn passed as an argument is an arrow
+map(x -> x * x, xs)
+reduce((acc, x) -> acc + x, 0, xs)
+
+;; #() keeps its positional parameters
+map(#(inc(%)), xs)
+
+;; anything else is a fn block
+def square: fn [x]: x * x end
+```
+
+The arrow is printed only for a call argument whose parameters are plain names and whose body fits on one line. It needs spaces on both sides: `->(x, f())` is still thread-first.
+
 ### Java Interop
 
 ```
@@ -414,9 +430,44 @@ A shape is a vector of slots, keyed by the macro's fully-qualified symbol:
 | `[:wrap? S n]` | lift a trailing `(S a1..an …)` into the header, e.g. raster's `(All [T] …)` |
 | `:body` | the remaining forms (last slot) |
 
-A shape can also carry options. With `{:dotted-calls true}` — set for ansatz's `a/defn`, `a/theorem` and `a/inductive` — `A.b(x)` inside the block is the plain call `(A.b x)` instead of the Java method call `(.b A x)`, so Lean-style names read naturally: `Nat.succ(n)`, `RBTree.node(Nat, …)`. A Java call inside such a block prints in the explicit form `.toUpperCase(s)`. The option applies only where the form is written as a block, which the reader and printer both know from the head.
+A shape can also carry options, which apply only where the form is written as a block (the reader and printer both know that from the head):
 
-Register a shape with `superficie.shapes/register-shape!` (`(register-shape! qsym shape opts)` for options), as `:superficie/shape` metadata on the macro var, or in a `superficie/shapes.edn` resource that a library ships on its classpath.
+| Option | Effect inside the block | Set for |
+|--------|-------------------------|---------|
+| `:dotted-calls true` | `A.b(x)` is the plain call `(A.b x)`, not the Java method call `(.b A x)`, so Lean-style names read naturally: `Nat.succ(n)`, `RBTree.node(Nat, …)`. A Java call prints in the explicit form `.toUpperCase(s)`. | ansatz's `a/defn`, `a/theorem`, `a/inductive` |
+| `:match-arms true` | a `match` with `[pattern body]` clauses prints as `\| pattern => body` arms | the same ansatz forms |
+| `:index {:get f :set g}` | in the body, `(f x i j)` prints as `x[i, j]`, and `x[i]` (no space before `[`) reads as `(f x i)`; `(g x i v)` prints as `x[i] <- v`. A bare symbol `f` is `{:get f}`. | raster's `deftm`, `ftm`, `par/map-void!` with `aget` and `aset` |
+
+```
+deftm laplacian [U :- Array(double) i :- Long W :- Long] :- Double:
+  U[i - 1] + U[i + 1] + U[i - W] + U[i + W] - 4.0 * U[i]
+end
+
+deftm scale! [U :- Array(double) n :- Long k :- Double] :- Void:
+  par/map-void! i n:
+    U[i] <- k * U[i]
+  end
+end
+
+a/defn len [xs :- List(Nat)] Nat:
+  match xs:
+    | nil => 0
+    | cons(h, t) => 1 + len(t)
+  end
+end
+```
+
+`:index` names functions; it does not fix what indexing means. raster's `aget` and `aset` dispatch on the array type like Julia's `getindex`/`setindex!`, so `U[i]` and `U[i] <- v` work for every element type raster knows. A store is written `<-` (as OCaml writes `a.(i) <- v`) because `=` is equality and `:=` binds a name. It goes bare as a body statement or call argument and in parentheses elsewhere: `1 + (U[0] <- 1)`.
+
+Register a shape, with its options, from any of these sources (the first that has a shape wins, and its options come with it):
+
+- `(superficie.shapes/register-shape! qsym shape opts)`
+- `:superficie/shape` and `:superficie/shape-options` metadata on the macro var
+- a `superficie/shapes.edn` resource a library ships on its classpath (JVM), mapping each symbol to a shape or to `{:shape [...] :options {...}}`:
+  ```clojure
+  {my.lib/defkernel {:shape [:name :params :body] :options {:index at}}}
+  ```
+- from JavaScript, `registerShape("my.lib/defkernel", "[:name :params :body]", "{:index at}")`
 
 Shapes are safe by construction. The reader needs no shape to parse a block: the header is everything between the head and `:`, the body everything up to `end`. The printer uses a shape only after checking that reading the block back gives the original form, and otherwise falls back to call syntax. Heads resolve through the file's `ns` form (`a/defn` with `[ansatz.core :as a]`, a referred `deftm`) the same way in the reader and the printer, and a head is always written back exactly as it appeared. A block header must stay on one line, except inside brackets, so a header whose `:` is missing never borrows the `:` of a later block.
 
@@ -521,6 +572,12 @@ renderString('(defn f [x] (+ x 1))');
 // Superficie → Clojure
 parseString('defn f [x]:\n  x + 1\nend');
 // => '(defn f [x] (+ x 1))'
+
+// A snippet without its ns form: name the requires it assumes,
+// so library macros render as blocks
+toSup('(deftm sq [x :- Double] :- Double (* x x))',
+      {context: "(require '[raster.core :refer [deftm]])"});
+// => 'deftm sq [x :- Double] :- Double:\n  x * x\nend'
 ```
 
 Works with static site generators (Astro, Next.js, etc.) to automatically render Clojure code blocks as superficie at build time. See [datahike.io](https://github.com/replikativ/datahike.io) for a working example with a remark plugin.

@@ -13,6 +13,47 @@
 
 (declare print-form)
 
+(defn- reader-anon-param
+  "For a parameter the Clojure reader generates for #(…) — p1__123#, p2__123#,
+   rest__123# — the % symbol it stands for; else nil. Only the #() reader makes
+   these names, so this identifies an anonymous-fn literal exactly."
+  [sym]
+  (when (symbol? sym)
+    (let [n (name sym)]
+      (if-let [[_ i] (re-matches #"p(\d+)__\d+#" n)]
+        (symbol (str "%" i))
+        (when (re-matches #"rest__\d+#" n) '%&)))))
+
+(defn- rename-syms
+  "form with every symbol s replaced by (f s), inside collections and the
+   syntax-quote records alike; metadata is kept."
+  [f form]
+  (let [walk #(rename-syms f %)
+        keep-meta (fn [y] (if (meta form) (with-meta y (meta form)) y))]
+    (cond
+      (symbol? form) (f form)
+      (record? form) (reduce-kv (fn [r k v] (assoc r k (walk v))) form form)
+      (seq? form) (keep-meta (apply list (map walk form)))
+      (vector? form) (keep-meta (mapv walk form))
+      (map? form) (keep-meta (into {} (map (fn [[k v]] [(walk k) (walk v)])) form))
+      (set? form) (keep-meta (into #{} (map walk) form))
+      :else form)))
+
+(defn clj-anon-fn
+  "If form is a (fn* [p1__N# …] body) the Clojure reader made from #(…), the
+   same function written with % parameters, as superficie's reader builds it:
+   (fn [%1 …] body[%1 …]), tagged :sup/sugar. Else nil."
+  [form]
+  (when (and (seq? form) (= 'fn* (first form)) (= 3 (count form))
+             (vector? (second form)))
+    (let [params (second form)
+          named (remove #{'&} params)]
+      (when (and (seq named) (every? reader-anon-param named))
+        (let [rename (into {} (map (fn [p] [p (reader-anon-param p)]) named))]
+          (with-meta (list 'fn (mapv #(get rename % %) params)
+                           (rename-syms #(get rename % %) (nth form 2)))
+            {:sup/sugar true}))))))
+
 ;; ---------------------------------------------------------------------------
 ;; Mode — :sup or :clj
 ;; ---------------------------------------------------------------------------
@@ -23,11 +64,30 @@
 ;; Print helpers
 ;; ---------------------------------------------------------------------------
 
+(def ^:dynamic *arrow-ok*
+  "True while printing a call argument directly: there a lambda may print as
+   `x -> body`, which a comma or ')' ends. Reset for anything nested."
+  false)
+
+(def ^:dynamic *arrow-here*
+  "*arrow-ok* as it was for the form being printed now."
+  false)
+
+(def ^:dynamic *stmt-ok*
+  "True while printing a body statement directly: there a store prints bare,
+   `x[i] <- v`. Reset for anything nested."
+  false)
+
+(def ^:dynamic *stmt-here*
+  "*stmt-ok* as it was for the form being printed now."
+  false)
+
 (defn- print-args
   "Print function arguments. Superficie uses familiar comma separators;
    Clojure output retains conventional whitespace separators."
   [forms]
-  (str/join (if (= *mode* :sup) ", " " ") (map #(print-form %) forms)))
+  (str/join (if (= *mode* :sup) ", " " ")
+            (map #(binding [*arrow-ok* (= *mode* :sup)] (print-form %)) forms)))
 
 (defn- percent-param?
   "Is sym a % parameter symbol (%1, %2, %&)?"
@@ -123,6 +183,17 @@
    Java method calls must use the explicit .b(A, x) form."
   false)
 
+(def ^:dynamic *match-arms*
+  "True inside a block whose shape has :match-arms: a match whose clauses are
+   [pattern body] vectors (ansatz's pattern form) prints them as `| pattern => body`
+   arms instead of core.match's `pattern => result` pairs."
+  false)
+
+(def ^:dynamic *index-sym*
+  "{:get f :set g} inside the body of a block whose shape has :index:
+   (aget x i) prints as x[i], (aset x i v) as x[i] <- v. nil elsewhere."
+  nil)
+
 (def ^:dynamic *in-quote*
   "True while printing the target of a quote. The reader parses no block
    syntax inside '..., so neither may the printer."
@@ -135,7 +206,11 @@
    clojure.core name. Heads with a registered shape get :shape-block."
   [head]
   (when (and (symbol? head) (not *in-quote*))
-    (if-let [q (shapes/resolve-static head)]
+    (if-let [q (if (and *match-arms* (= 'match head))
+                 ;; inside an ansatz block, match is ansatz's pattern match; the
+                 ;; reader reads a bare `match x:` block with | arms
+                 'clojure.core.match/match
+                 (shapes/resolve-static head))]
       (or (get @block-dispatch q)
           (when (shapes/shape-for q) :shape-block))
       (or (get @block-dispatch head)
@@ -264,9 +339,10 @@
   [forms]
   (let [inner (str *indent* "  ")]
     (binding [*indent* inner]
-      (str/join "\n" (map #(str inner (if *body-form-printer*
-                                        (*body-form-printer* % (count inner))
-                                        (print-form %)))
+      (str/join "\n" (map #(str inner (binding [*stmt-ok* true]
+                                        (if *body-form-printer*
+                                          (*body-form-printer* % (count inner))
+                                          (print-form %))))
                           forms)))))
 
 (defn- print-defn-block [head args]
@@ -311,7 +387,31 @@
       :else
       (str head-str "(" (print-args args) ")"))))
 
+(declare print-fn-block*)
+
+(defn- arrow-lambda
+  "`x -> body` / `(x, y) -> body` for (fn [params] body) in a call argument, when
+   the parameters are plain names and the body stays on one line; else nil."
+  [head args]
+  (when (and *arrow-here* (= 'fn head) (= 2 (count args)) (vector? (first args)))
+    (let [[params body] args]
+      (when (and (every? #(and (symbol? %) (nil? (namespace %))
+                               ;; a type hint (^long x) keeps the fn form
+                               (empty? (forms/strip-internal-meta (meta %)))
+                               (not= '& %) (not (contains? @ops/*surface-index* (name %))))
+                         params)
+                 (empty? (forms/strip-internal-meta (meta params))))
+        (let [b (print-form body)]
+          (when-not (str/includes? b "\n")
+            (str (if (= 1 (count params))
+                   (str (first params))
+                   (str "(" (str/join ", " params) ")"))
+                 " -> " b)))))))
+
 (defn- print-fn-block [head args]
+  (or (arrow-lambda head args) (print-fn-block* head args)))
+
+(defn- print-fn-block* [head args]
   (let [head-str (clojure.core/name head)
         [maybe-name & rest1] args
         [name-sym rest2] (if (symbol? maybe-name)
@@ -542,15 +642,28 @@
   (let [[expr & clauses] args
         pairs (partition 2 clauses)
         inner (str *indent* "  ")]
-    (str (clojure.core/name head) " " (colon-sep (print-form expr)) "\n"
-         (binding [*indent* inner]
-           (str/join "\n"
-                     (map (fn [[pat result]]
+    (if (and *match-arms* (seq clauses)
+             (every? #(and (vector? %) (= 2 (count %))) clauses))
+      ;; pattern-form match (ansatz): each clause [pattern body] as an arm
+      (str (clojure.core/name head) " " (colon-sep (print-form expr)) "\n"
+           (binding [*indent* inner]
+             (str/join "\n" (map (fn [[pat body]]
+                                   (str inner "| " (print-form pat) " => " (print-form body)))
+                                 clauses)))
+           "\n" *indent* "end")
+      (if *match-arms*
+      ;; ansatz's explicit form (match x T R (ctor [fields] body) …): not core.match
+      ;; pairs, which would misrepresent it — call syntax
+        (str (clojure.core/name head) "(" (print-args args) ")")
+        (str (clojure.core/name head) " " (colon-sep (print-form expr)) "\n"
+             (binding [*indent* inner]
+               (str/join "\n"
+                         (map (fn [[pat result]]
                             ;; :else catch-all → print as bare _ wildcard
-                            (let [pat-str (if (= :else pat) "_" (print-form pat))]
-                              (str inner pat-str " => " (print-form result))))
-                          pairs)))
-         "\n" *indent* "end")))
+                                (let [pat-str (if (= :else pat) "_" (print-form pat))]
+                                  (str inner pat-str " => " (print-form result))))
+                              pairs)))
+             "\n" *indent* "end")))))
 
 (defn- print-defmethod-block [head args]
   (let [[name-sym dispatch-val params & body] args]
@@ -612,10 +725,13 @@
 
 (defn- print-defrecord-block [head args]
   (let [[name-sym fields & items] args]
-    (str (clojure.core/name head) " " (print-form name-sym)
-         " " (print-form fields) ":\n"
-         (print-protocol-impl-items items) "\n"
-         *indent* "end")))
+    (if (empty? items)
+      ;; a record with no protocol implementations: one line
+      (str (clojure.core/name head) " " (print-form name-sym) " " (print-form fields) ": end")
+      (str (clojure.core/name head) " " (print-form name-sym)
+           " " (print-form fields) ":\n"
+           (print-protocol-impl-items items) "\n"
+           *indent* "end"))))
 
 (defn- print-reify-block [head args]
   (str (clojure.core/name head) ":\n"
@@ -727,6 +843,30 @@
              n (count (rest form))]
          (boolean (and e (if (:variadic e) (>= n 2) (= n 2)))))))
 
+(defn index-form?
+  "Is form (aget x i …) inside a block whose index function is aget?"
+  [form]
+  (and (= *mode* :sup) *index-sym* (seq? form) (= (:get *index-sym*) (first form))
+       (>= (count form) 3)))
+
+(defn store-form?
+  "Is form (aset x i … v) inside a block whose index store function is aset?"
+  [form]
+  (and (= *mode* :sup) (:set *index-sym*) (seq? form) (= (:set *index-sym*) (first form))
+       (>= (count form) 4)))
+
+(defn store-parts
+  "For a store form: [target-string value]; the target is x[i, …]."
+  [form]
+  [(print-form (apply list (:get *index-sym*) (butlast (rest form))))
+   (last form)])
+
+(defn store-bare?
+  "May the store being printed now go without parentheses? Only as a body
+   statement or a call argument, where nothing can continue it."
+  []
+  (or *stmt-here* *arrow-here*))
+
 (defn infix-parts
   "For a form that prints as infix: [operator-string operand-strings], with the
    operands parenthesized as print-form would. The pretty-printer uses it to
@@ -788,11 +928,14 @@
         outer *dotted-calls*]
     ;; the option applies only if the form prints as a block: the reader
     ;; switches it on when it parses the block, never for call syntax
-    (binding [*dotted-calls* (or outer (boolean (:dotted-calls (shapes/shape-options q))))]
-      (print-shape-block* head args outer))))
+    (binding [*dotted-calls* (or outer (boolean (:dotted-calls (shapes/shape-options q))))
+              *match-arms* (or *match-arms* (boolean (:match-arms (shapes/shape-options q))))]
+      (print-shape-block* head args outer (or (shapes/index-fns (shapes/shape-options q)) *index-sym*)))))
 
 (defn- print-shape-block*
-  [head args outer-dotted]
+  "Indexing (body-index) applies in the body only: a header is names,
+   parameters and types, where `name[x]` would be ambiguous."
+  [head args outer-dotted body-index]
   (let [shape (shapes/shape-for (or (shapes/resolve-static head) head))
         [header body :as split] (when shape (shapes/split-verified shape args))
         head-str (str head)
@@ -808,7 +951,8 @@
                                        (+ col (count s) 1))]
                             (recur (rest items) col' (conj out s)))
                           out)))
-        header-strs (print-items header (+ (count *indent*) (count head-str) 1))
+        header-strs (binding [*index-sym* nil]
+                      (print-items header (+ (count *indent*) (count head-str) 1)))
         ;; a multi-line docstring goes on its own continuation line, with the rest
         ;; of the header on the next one — Python's hanging indent, deeper than the body
         flat-len (+ (count *indent*) (count head-str) 1
@@ -837,7 +981,8 @@
                    doc-idx
                    (let [before (subvec (vec header-strs) 0 doc-idx)
                          doc (nth header-strs doc-idx)
-                         after (print-items (subvec (vec header) (inc doc-idx)) (count cont-indent))]
+                         after (binding [*index-sym* nil]
+                                 (print-items (subvec (vec header) (inc doc-idx)) (count cont-indent)))]
                      (str head-str (when (seq before) (str " " (str/join " " before)))
                           "\n" cont-indent (if (seq after) doc (colon-sep doc))
                           (when (seq after)
@@ -847,7 +992,7 @@
                    :else
                    (str head-str ":"))]
         (if (seq body)
-          (str line "\n" (print-body (vec body)) "\n" *indent* "end")
+          (str line "\n" (binding [*index-sym* body-index] (print-body (vec body))) "\n" *indent* "end")
           (str line " end"))))))
 
 (defn- print-block-form [head args]
@@ -877,8 +1022,18 @@
 ;; Main dispatch
 ;; ---------------------------------------------------------------------------
 
+(declare print-form*)
+
 (defn print-form
   "Print a single Clojure form as sup text."
+  [form]
+  (binding [*arrow-here* *arrow-ok*
+            *arrow-ok* false
+            *stmt-here* *stmt-ok*
+            *stmt-ok* false]
+    (print-form* form)))
+
+(defn- print-form*
   [form]
   (cond
     ;; metadata prefix: ^:key, ^Type, or ^{map} — emit before the form
@@ -946,7 +1101,17 @@
     (let [head (first form)]
       (cond
         (anon-fn-shorthand? form)
-        (str "#(" (print-form (nth form 2)) ")")
+        ;; a single parameter is written %, as Clojure writes #(* % %)
+        (let [body (nth form 2)
+              body (if (#{['%1] ['%1 '& '%&]} (second form))
+                     ;; (not a #() literal here: the reader would rewrite the quoted %)
+                     (rename-syms (fn [s] (if (= '%1 s) (symbol "%") s)) body)
+                     body)]
+          (str "#(" (print-form body) ")"))
+
+        ;; #(…) from Clojure source: the reader's fn* with p1__N# parameters
+        (and (= *mode* :sup) (clj-anon-fn form))
+        (print-form (clj-anon-fn form))
 
         ;; @deref — always use shorthand (both 'x and (quote x) from Clojure source round-trip)
         (= head 'clojure.core/deref)
@@ -965,6 +1130,22 @@
         (and (= *mode* :sup) (seq? head) (= 'var (first head)) (= 2 (count head))
              (seq (rest form)))
         (str "(#'" (print-form (second head)) ")(" (print-args (rest form)) ")")
+
+        ;; sup mode: x[i] <- v for the block's index store function (raster's aset)
+        (store-form? form)
+        (let [[target v] (store-parts form)
+              s (str target " <- " (print-form v))]
+          (if (store-bare?) s (str "(" s ")")))
+
+        ;; sup mode: x[i, j] for the block's index function (raster's aget)
+        (index-form? form)
+        (let [[_ target & idx] form
+              t (print-form target)]
+          (str (if (or (depth0-space? t)
+                       (and (seq? target) (not (str/ends-with? t ")"))))
+                 (str "(" t ")")
+                 t)
+               "[" (print-args idx) "]"))
 
         ;; sup mode: block forms (defn, if, let, fn, etc.)
         (and (= *mode* :sup) (symbol? head) (some? (block-kind-for head)))

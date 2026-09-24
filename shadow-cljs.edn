@@ -17,7 +17,8 @@
                :parseString   superficie.api/parseString
                :toSup         superficie.api/toSup
                :toClj         superficie.api/toClj
-               :supToForms    superficie.api/supToForms}
+               :supToForms    superficie.api/supToForms
+               :registerShape superficie.api/registerShape}
    :compiler-options {:infer-externs true
                       :optimizations :advanced}}
 

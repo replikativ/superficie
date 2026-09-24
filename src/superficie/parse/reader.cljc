@@ -50,7 +50,13 @@
     ;; true inside ns clauses: libspecs are data, so `[+ - *]` is three symbols
     :no-infix       (volatile! false)
     ;; true inside a block whose shape has :dotted-calls — A.b(x) is (A.b x)
-    :dotted-calls   (volatile! false)}))
+    :dotted-calls   (volatile! false)
+    ;; {:get f :set g} inside a block whose shape has :index (x[i] → (aget x i))
+    :index-sym      (volatile! nil)
+    ;; token position where the current body statement starts: `x := v` binds
+    ;; only there. :top-start is the same for a top-level form, where it may not.
+    :stmt-start     (volatile! -1)
+    :top-start      (volatile! -1)}))
 
 (defn- peof? [{:keys [tokens pos]}]
   (>= @pos (count tokens)))
@@ -537,7 +543,14 @@
             (cond
               (or (nil? tok) (block-terminator? tok)) forms
               :else
-              (let [form (parse-expr p)]
+              (let [form (do (vreset! (:stmt-start p) @(:pos p))
+                             (parse-expr p))
+                    nxt (ppeek p)]
+                ;; `aget(U, i) <- v` would otherwise read as three statements
+                (when (and @(:index-sym p) (sym-value? nxt "<-")
+                           (not (str/includes? (or (:ws nxt) "") "\n")))
+                  (errors/reader-error "'<-' stores into an index: write x[i] <- v"
+                                       (error-data p (select-keys nxt [:line :col]))))
                 (if (discard-sentinel? form)
                   (recur forms)
                   (recur (conj forms form)))))))]
@@ -1345,14 +1358,16 @@
           (or (tok-type? tok :open-paren)
               (tok-type? tok :open-bracket)
               (tok-type? tok :open-brace)
-              (tok-type? tok :open-set)) (recur (inc i) (inc depth))
+              (tok-type? tok :open-set)
+              (tok-type? tok :open-anon-fn)) (recur (inc i) (inc depth))
           :else (recur (inc i) depth))
         :else
         (cond
           (or (tok-type? tok :open-paren)
               (tok-type? tok :open-bracket)
               (tok-type? tok :open-brace)
-              (tok-type? tok :open-set)) (recur (inc i) (inc depth))
+              (tok-type? tok :open-set)
+              (tok-type? tok :open-anon-fn)) (recur (inc i) (inc depth))
           (or (tok-type? tok :close-paren)
               (tok-type? tok :close-bracket)
               (tok-type? tok :close-brace)) (recur (inc i) (dec depth))
@@ -1454,14 +1469,16 @@
                          (end-symbol? t)              false
                          (or (tok-type? t :open-bracket)
                              (tok-type? t :open-brace)
-                             (tok-type? t :open-set))  (recur (inc i) (inc depth))
+                             (tok-type? t :open-set)
+                             (tok-type? t :open-anon-fn))  (recur (inc i) (inc depth))
                          :else (recur (inc i) depth))
                        :else
                        (cond
                          (or (tok-type? t :open-paren)
                              (tok-type? t :open-bracket)
                              (tok-type? t :open-brace)
-                             (tok-type? t :open-set)) (recur (inc i) (inc depth))
+                             (tok-type? t :open-set)
+                             (tok-type? t :open-anon-fn)) (recur (inc i) (inc depth))
                          (or (tok-type? t :close-paren)
                              (tok-type? t :close-bracket)
                              (tok-type? t :close-brace)) (recur (inc i) (dec depth))
@@ -1492,15 +1509,21 @@
    The header is every form before ':' and the body every form before 'end'.
    The shape is only consulted to re-nest a :wrap? slot (see superficie.shapes)."
   [p form-sym qsym tok colon-in-kw?]
-  (let [outer-dotted @(:dotted-calls p)]
-    (when (:dotted-calls (shapes/shape-options qsym))
+  (let [outer-dotted @(:dotted-calls p)
+        outer-index @(:index-sym p)
+        opts (shapes/shape-options qsym)]
+    (when (:dotted-calls opts)
       (vreset! (:dotted-calls p) true))
     (try
-      (parse-shape-block* p form-sym qsym tok colon-in-kw?)
-      (finally (vreset! (:dotted-calls p) outer-dotted)))))
+      (parse-shape-block* p form-sym qsym tok colon-in-kw? (or (shapes/index-fns opts) outer-index))
+      (finally (vreset! (:dotted-calls p) outer-dotted)
+               (vreset! (:index-sym p) outer-index)))))
 
 (defn- parse-shape-block*
-  [p form-sym qsym tok colon-in-kw?]
+  "Indexing (body-index) applies in the body only: a header is names,
+   parameters and types, where `name[x]` would be ambiguous."
+  [p form-sym qsym tok colon-in-kw? body-index]
+  (vreset! (:index-sym p) nil)
   (let [shape (shapes/shape-for qsym)
         loc (select-keys tok [:line :col])
         name-first? (= :name (shapes/first-slot shape))
@@ -1521,7 +1544,8 @@
                                                 (str/ends-with? (name f) ":"))
                                            (conj header (first (strip-expr-colon f)))
                                            :else (recur (conj header f)))))))
-        body (parse-body p)]
+        body (do (vreset! (:index-sym p) body-index)
+                 (parse-body p))]
     (when-not (end-symbol? (ppeek p))
       (errors/reader-error (str "Expected 'end' to close " form-sym " block")
                            (error-data p (assoc (plast-loc p)
@@ -1546,7 +1570,26 @@
 
         (end-symbol? (ppeek p))
         (do (padvance! p)
-            (apply list form-sym expr (apply concat clauses)))
+            (let [arms (filter :arm clauses)]
+              (cond
+                (empty? arms) (apply list form-sym expr (apply concat clauses))
+                (= (count arms) (count clauses)) (apply list form-sym expr (map :arm clauses))
+                :else (errors/reader-error
+                       "A match mixes `| pattern => body` arms with `pattern => result` arms"
+                       (error-data p (assoc (select-keys tok [:line :col])
+                                            :hint "Write every arm of this match the same way"))))))
+
+        ;; | pattern => body — a clause of a pattern-form match (ansatz), read
+        ;; as the vector [pattern body]
+        (sym-value? (ppeek p) "|")
+        (do (padvance! p)
+            (let [pat-form (parse-expr p)
+                  _ (when-not (arrow-tok? (ppeek p))
+                      (errors/reader-error "Expected '=>' in match arm"
+                                           (error-data p (plast-loc p))))
+                  _ (padvance! p)
+                  body (parse-expr p)]
+              (recur (conj clauses {:arm [pat-form body]}))))
 
         :else
         (let [pat-form (parse-expr p)
@@ -1603,20 +1646,16 @@
   (and (vector? form) (= let-stmt-tag (first form))))
 
 (defn- wrap-body-lets
-  "Collect consecutive ::let-stmt sentinels into (let [...] body...).
+  "A body's statements with each run of consecutive ::let-stmt sentinels made
+   one (let [...] rest-of-body...): `x := v` binds x for the rest of the body.
    Called by parse-body; declared above for forward reference."
   [forms]
-  (loop [remaining (vec forms) bindings []]
-    (if (empty? remaining)
-      (if (empty? bindings)
-        []
-        [(apply list 'let bindings)])
-      (let [f (first remaining)]
-        (if (let-stmt? f)
-          (recur (subvec remaining 1) (into bindings (rest f)))
-          (if (empty? bindings)
-            remaining
-            [(apply list 'let bindings (vec remaining))]))))))
+  (let [[before from] (split-with (complement let-stmt?) forms)]
+    (if (empty? from)
+      (vec forms)
+      (let [[stmts after] (split-with let-stmt? from)]
+        (conj (vec before)
+              (apply list 'let (vec (mapcat rest stmts)) (wrap-body-lets after)))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Surface syntax: infix pratt-climbing
@@ -1668,6 +1707,24 @@
       :else
       (list op left right))))
 
+(defn- arrow-param-list?
+  "Just inside an open paren: is this `(x, y) ->` — plain parameter names up to
+   the matching `)`, then `->`? Only then is the group a lambda's parameter list."
+  [p]
+  (loop [i 0]
+    (let [tok (ppeek p i)]
+      (cond
+        (nil? tok) false
+        (tok-type? tok :close-paren)
+        (let [nxt (ppeek p (inc i))]
+          (boolean (and (sym-value? nxt "->") (:ws nxt))))
+        (and (tok-type? tok :symbol)
+             (not (contains? @ops/*surface-index* (:value tok)))
+             (not (str/includes? (:value tok) "/"))) (recur (inc i))
+        :else false))))
+
+(defn- arrow-params? [x] (::arrow-params (meta x)))
+
 (defn- pratt-climb
   "Pratt precedence-climbing. Consumes infix operators while prec >= min-prec.
    Resolves operator surface strings to qualified symbols via :resolve-sym opts
@@ -1679,31 +1736,63 @@
     (loop [left left]
       (let [tok      (ppeek p)
             next-tok (ppeek p 1)]
-        (if-not (and (infix-tok? tok next-tok)
+        (cond
+          ;; x -> body, (x, y) -> body: a lambda, at the lowest precedence only;
+          ;; never after a comma (then -> is a symbol argument)
+          (and (zero? min-prec)
+               (sym-value? tok "->")
+               (:ws tok)
+               (:ws next-tok)
+               (not (str/includes? (str/replace (:ws tok) #";[^\n]*" "") ","))
+               (or (arrow-params? left)
+                   (and (symbol? left) (nil? (namespace left))
+                        (not (contains? @ops/*surface-index* (name left))))))
+          (do (padvance! p)
+              (let [body (parse-expr p 0)]
+                (recur (list 'fn (with-meta (vec (if (symbol? left) [left] left)) nil) body))))
+
+          ;; x[i] <- v: a store through the block's :index set function
+          (and (zero? min-prec)
+               (::indexed (meta left))
+               (sym-value? tok "<-")
+               (:ws tok)
+               (:ws next-tok)
+               (not (str/includes? (str/replace (:ws tok) #";[^\n]*" "") ",")))
+          (let [store (:set @(:index-sym p))
+                loc (select-keys tok [:line :col])]
+            (when-not store
+              (errors/reader-error "'<-' stores into an index, but this block's :index has no :set function"
+                                   (error-data p loc)))
+            (padvance! p)
+            (let [v (parse-expr p 0)]
+              (recur (apply list store (concat (rest left) [v])))))
+
+          :else
+          (if-not (and (infix-tok? tok next-tok)
                      ;; a comma ends an argument: in f(a, +, b) the + is a
                      ;; symbol argument, never infix (commas in comments don't count)
-                     (not (str/includes? (str/replace (or (:ws tok) "") #";[^\n]*" "") ",")))
-          left
-          (let [op-str      (:value tok)
-                resolve-sym (:resolve-sym (:opts p))
+                       (not (str/includes? (str/replace (or (:ws tok) "") #";[^\n]*" "") ",")))
+            left
+            (let [op-str      (:value tok)
+                  resolve-sym (:resolve-sym (:opts p))
                 ;; Primary: namespace-aware resolution via :resolve-sym hook
                 ;; Secondary: static surface-index fallback
-                qsym        (or (when resolve-sym
-                                  (let [q (resolve-sym op-str)]
-                                    (when (and q (get @ops/*op-registry* q)) q)))
-                                (get @ops/*surface-index* op-str))
-                entry       (when qsym (get @ops/*op-registry* qsym))
-                prec        (or (:prec entry) 0)]
-            (if (< prec min-prec)
-              left
-              (do
-                (padvance! p)
-                (let [right-min-prec (if (= :right (:assoc entry)) prec (inc prec))
-                      right          (parse-expr p right-min-prec)
-                      result         (if-let [expander (:expander entry)]
-                                       (expander left right)
-                                       (build-binary qsym entry left right))]
-                  (recur result))))))))))
+                  qsym        (or (when resolve-sym
+                                    (let [q (resolve-sym op-str)]
+                                      (when (and q (get @ops/*op-registry* q)) q)))
+                                  (get @ops/*surface-index* op-str))
+                  entry       (when qsym (get @ops/*op-registry* qsym))
+                  prec        (or (:prec entry) 0)]
+              (if (< prec min-prec)
+                left
+                (do
+                  (padvance! p)
+                  (let [right-min-prec (if (= :right (:assoc entry)) prec (inc prec))
+                        right          (parse-expr p right-min-prec)
+                        result         (if-let [expander (:expander entry)]
+                                         (expander left right)
+                                         (build-binary qsym entry left right))]
+                    (recur result)))))))))))
 
 (defn parse-expr
   "Parse a full surface expression: a form plus any infix operators."
@@ -1717,11 +1806,22 @@
 (defn- maybe-parse-let-stmt
   "After parsing a symbol, check for ':=' — if found, parse as let-statement.
    Returns a ::let-stmt vector sentinel, or the bare symbol if no ':='.
+   `x := v` binds only as a body statement: start is the position of the
+   statement's first token (x, or `let` in `let x := v`), and := must follow on
+   the same line. Anywhere else := is the keyword, as in [x := y].
    Only fires for unqualified, non-operator symbols — quoted operator values like
    '= and qualified symbols like clojure.core/= in map literals must not be treated
    as let-binding variables."
-  [p sym]
-  (if (and (bind-op? (ppeek p))
+  [p start sym]
+  (when (and (= start @(:top-start p))
+             (bind-op? (ppeek p))
+             (not (str/includes? (or (:ws (ppeek p)) "") "\n")))
+    (errors/reader-error "':=' binds a name for the rest of a block body — at top level, use def"
+                         (error-data p (select-keys (ppeek p) [:line :col]))))
+  (if (and (= start @(:stmt-start p))
+           (bind-op? (ppeek p))
+           (not (str/includes? (or (:ws (ppeek p)) "") "\n"))
+           (not @(:sexp-mode p))
            (symbol? sym)
            (nil? (namespace sym))
            (not (contains? @ops/*surface-index* (name sym)))
@@ -1743,7 +1843,8 @@
       (errors/reader-error "Unexpected end of input — expected a form" (error-data p (assoc (plast-loc p) :incomplete true))))
     (case (:type tok)
       :symbol
-      (let [s (:value tok)]
+      (let [s (:value tok)
+            start @(:pos p)]
         (padvance! p)
         (case s
           "nil" nil
@@ -1766,7 +1867,7 @@
                       args (parse-call-args p)]
                   (apply list class-sym args)))
               ;; fallback: 'new' as a regular symbol
-              (maybe-parse-let-stmt p (maybe-call p 'new))))
+              (maybe-parse-let-stmt p start (maybe-call p 'new))))
           ;; block keywords not followed by adjacent ( → block form
           ;; strip trailing colon (e.g. "defn:" → "defn") for dispatch
           ;; Special case: "let x := expr" sugar — detected before block dispatch
@@ -1798,12 +1899,13 @@
 
               ;; let-stmt sugar: let varname := expr
               (and (= "let" base-str)
+                   (or (= start @(:stmt-start p)) (= start @(:top-start p)))
                    (not (adjacent-open-paren? p))
                    (tok-type? (ppeek p) :symbol)
                    (bind-op? (ppeek p 1)))
               (let [var-sym (symbol (:value (ppeek p)))]
                 (padvance! p) ; consume the variable name
-                (maybe-parse-let-stmt p var-sym))
+                (maybe-parse-let-stmt p start var-sym))
 
               :else
               ;; Block dispatch: resolve bare name to qualified symbol via
@@ -1825,7 +1927,7 @@
                                  (and nt (= (:line nt) (:line tok))
                                       (not (closer-types (:type nt))))))
                       (vswap! (:unstarted p) conj {:word base-str :line (:line tok) :col (:col tok)}))
-                    (maybe-parse-let-stmt p (maybe-call p (symbol s))))))))))
+                    (maybe-parse-let-stmt p start (maybe-call p (symbol s))))))))))
 
       :keyword
       (let [v (:value tok)]
@@ -1861,6 +1963,14 @@
       (let [loc (select-keys tok [:line :col])]
         (padvance! p)
         (cond
+          ;; (x, y) -> body — a lambda's parameter list
+          (and (not @(:sexp-mode p)) (arrow-param-list? p))
+          (let [params (loop [acc []]
+                         (if (tok-type? (ppeek p) :close-paren)
+                           (do (padvance! p) acc)
+                           (let [t (ppeek p)] (padvance! p) (recur (conj acc (symbol (:value t)))))))]
+            (with-meta params {::arrow-params true}))
+
           ;; Empty list ()
           (tok-type? (ppeek p) :close-paren)
           (do (padvance! p) (list))
@@ -2021,9 +2131,10 @@
             (maybe-call p tagged))))
 
       :open-anon-fn
-      ;; #() — parse body as sup, collect % params, emit (fn [params] body)
+      ;; #() — parse body as sup, collect % params, emit (fn [params] body).
+      ;; The body is an expression, so #(% * %) and #(% + 1) work.
       (do (padvance! p)
-          (let [body (parse-form p)
+          (let [body (parse-expr p)
                 _ (when (discard-sentinel? body)
                     (errors/reader-error "#() body was discarded — #() requires a non-discarded expression"
                                          (error-data p (select-keys tok [:line :col]))))
@@ -2112,6 +2223,17 @@
     (adjacent-open-paren? p)
     (let [args (parse-call-args p)]
       (recur p (apply list form args)))
+
+    ;; x[i, j] → (aget x i j) inside a block whose shape has :index aget —
+    ;; an adjacent [ only; `f [x]` with a space stays two forms
+    (and @(:index-sym p)
+         (tok-type? (ppeek p) :open-bracket)
+         (not (:ws (ppeek p))))
+    (let [loc (select-keys (ppeek p) [:line :col])
+          idx (parse-vector p)]
+      (when (empty? idx)
+        (errors/reader-error "Empty index — write x[i]" (error-data p loc)))
+      (recur p (with-meta (apply list (:get @(:index-sym p)) form idx) {::indexed true})))
 
     ;; postfix method: form.method(args) → (.method form args)
     (adjacent-dot-method? p)
@@ -2222,7 +2344,8 @@
         (errors/reader-error (str "Unexpected '" (str/replace (:value tok) #":$" "")
                                   "' — no block is open here")
                              (error-data p (select-keys tok [:line :col]))))
-      (let [form (parse-expr p)]
+      (let [form (do (vreset! (:top-start p) @(:pos p))
+                     (parse-expr p))]
         (when-let [ctx (shapes/ns-context form @(:ns-ctx p))]
           (vreset! (:ns-ctx p) ctx))
         form))
@@ -2245,7 +2368,7 @@
                            (discard-sentinel? form) (recur forms)
                            (splice-result? form) (recur (into forms form))
                            :else (recur (conj forms form))))))]
-     (cond-> (wrap-body-lets raw-forms)
+     (cond-> raw-forms
        trailing (with-meta {:trailing-ws trailing})))))
 
 ;; ---------------------------------------------------------------------------
