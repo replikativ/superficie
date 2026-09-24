@@ -33,6 +33,7 @@
      ;; Comparison
     'clojure.core/=    {:prec 30 :assoc :left  :kind :infix :comparison true}
     'clojure.core/not= {:prec 30 :assoc :left  :kind :infix :comparison true}
+    'clojure.core/==   {:prec 30 :assoc :left  :kind :infix :comparison true}
     'clojure.core/<    {:prec 30 :assoc :left  :kind :infix :comparison true}
     'clojure.core/>    {:prec 30 :assoc :left  :kind :infix :comparison true}
     'clojure.core/<=   {:prec 30 :assoc :left  :kind :infix :comparison true}

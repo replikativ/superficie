@@ -59,7 +59,14 @@
     ansatz.core/defn      [:name :params :form? [:kw? :termination-by] :body]
     ansatz.core/theorem   [:name :params :form :body]
     ansatz.core/deftheorem [:name :params :form :body]
-    ansatz.core/inductive [:name :params [:kw? :in] [:kw? :indices] :body]})
+    ansatz.core/inductive [:name :params [:kw? :in] [:kw? :indices] :body]
+    ;; spindel: reactive/probabilistic program blocks
+    org.replikativ.spindel.spin.cps/spin [:body]
+    org.replikativ.spindel.core/spin     [:body]
+    org.replikativ.spindel.core/batch    [:body]
+    org.replikativ.spindel.core/gen-aseq [:body]
+    org.replikativ.spindel.core/with-context [:form :body]
+    org.replikativ.spindel.core/for      [:params :body]})
 
 ;; Options that change how a shaped block's contents are read and printed.
 ;;   :dotted-calls  inside the block, `A.b(x)` is the plain call (A.b x) rather
