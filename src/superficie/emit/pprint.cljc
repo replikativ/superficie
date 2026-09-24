@@ -382,9 +382,11 @@
         (let [indent (indent-str col)
               ;; an operand at column c: flat when it fits, else pretty-printed
               ;; if it needs no parens (its flat text is its own print-form)
+              ;; never split a tighter infix operand (c * u under -) across lines
+              breakable? (fn [x a] (and (= x (flat a)) (not (printer/infix-form? a))))
               render (fn [x a c]
                        (if (or (<= (+ c (count x)) width)
-                               (not= x (flat a)))
+                               (not (breakable? x a)))
                          x
                          (pp a c width)))
               [_ x0 a0] (first chain)
@@ -397,7 +399,7 @@
               (let [piece (str op " " x)
                     here (+ cur 1 (count op) 1)
                     ;; the operand pretty-printed in place, if its first line fits
-                    inline (when (and (= x (flat a)) (> (+ here (count x)) width))
+                    inline (when (and (breakable? x a) (> (+ here (count x)) width))
                              (let [r (pp a here width)
                                    first-line (first (str/split r #"\n"))]
                                (when (and (str/includes? r "\n")
