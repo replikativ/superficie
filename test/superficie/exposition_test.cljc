@@ -148,3 +148,11 @@
       (is (str/includes? out "\n+ aget(U, y * W + xm)"))
       (is (str/includes? out "\n- c * u")))
     (is (= [form] (core/sup->forms out)))))
+
+(deftest test-snippet-context
+  (let [snip "(deftm weight [att :- Double, d :- Double] :- Double (* att d))"]
+    (testing "a fragment without its ns form renders library macros as calls"
+      (is (str/starts-with? (core/clj->sup snip) "deftm(")))
+    (testing "the context supplies the requires the fragment assumes"
+      (is (= "deftm weight [att :- Double d :- Double] :- Double:\n  att * d\nend"
+             (core/clj->sup snip {:context "(require '[raster.core :refer [deftm]])"}))))))

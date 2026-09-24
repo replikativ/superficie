@@ -3,9 +3,12 @@
   (:require [superficie.core :as core]))
 
 (defn ^:export toSup
-  "Convert a Clojure source string to superficie syntax. Returns a string."
-  [source]
-  (core/clj->sup source))
+  "Convert a Clojure source string to superficie syntax. Returns a string.
+   Optional opts object: {width: 80, context: \"(require '[raster.core :refer [deftm]])\"}
+   — context holds the ns/require forms a snippet assumes but does not contain."
+  ([source] (core/clj->sup source))
+  ([source opts]
+   (core/clj->sup source (js->clj opts :keywordize-keys true))))
 
 (defn ^:export toClj
   "Convert a superficie source string to Clojure source. Returns a string."

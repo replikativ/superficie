@@ -9,6 +9,7 @@
    Pipeline:
      superficie.pipeline/run — full ctx->ctx pipeline with intermediate state"
   (:require [superficie.emit.printer :as printer]
+            [superficie.shapes :as shapes]
             [superficie.emit.pprint :as pprint]
             [superficie.forms :as forms]
             [superficie.parse.expander :as expander]
@@ -211,12 +212,27 @@
   ([sup-src] (forms->clj (sup->forms sup-src {:read-cond :preserve})))
   ([sup-src opts] (forms->clj (sup->forms sup-src (merge {:read-cond :preserve} opts)))))
 
+(defn context-from-source
+  "The namespace context (aliases and refers) established by the ns and
+   top-level require forms of a Clojure source string."
+  [src]
+  (reduce (fn [ctx form] (or (shapes/ns-context form ctx) ctx))
+          nil
+          (clj->forms src)))
+
 (defn clj->sup
   "Convert a Clojure source string to superficie syntax.
-   Uses width-aware pretty-printing (default 80 columns)."
+   Uses width-aware pretty-printing (default 80 columns).
+   opts: {:width 80
+          :context \"(require '[raster.core :refer [deftm]])\"} — ns/require forms
+   the snippet assumes but does not contain, so a fragment of a file renders
+   its library macros as blocks (a deftm, a spin, an a/theorem)."
   ([clj-src] (clj->sup clj-src nil))
   ([clj-src opts]
-   (pprint-sup (clj->forms clj-src) opts)))
+   (binding [shapes/*ns-context* (if-let [c (:context opts)]
+                                   (context-from-source c)
+                                   shapes/*ns-context*)]
+     (pprint-sup (clj->forms clj-src) opts))))
 
 ;; ---------------------------------------------------------------------------
 ;; Pipeline access
