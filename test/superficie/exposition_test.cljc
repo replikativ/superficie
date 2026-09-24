@@ -117,3 +117,24 @@
     (is (str/includes? out "deftm weight\n    \"The power kernel.\n  A second line.\"\n    [att :- Double d :- Double] :- Double:"))
     (is (str/includes? out "defn f\n    \"First.\n  Second.\"\n    [x]:"))
     (is (roundtrips? forms))))
+
+(deftest test-spindel-blocks
+  (let [forms '[(ns demo (:require [org.replikativ.spindel.spin.cps :refer [spin]]))
+                (defn model [a0 a1]
+                  (spin (let [alpha (sample (uniform a0 a1) :id :alpha)] alpha)))]
+        out (core/pprint-sup forms)]
+    (is (str/includes? out "  spin:\n    let [alpha sample(uniform(a0, a1), :id, :alpha)]:"))
+    (is (roundtrips? forms))))
+
+(deftest test-block-binding-value-layout
+  (let [forms '[(defn f [y]
+                  (let [a 1
+                        yhat (if (contains? y :turnover) (:turnover y) y)]
+                    yhat))]
+        out (core/pprint-sup forms)]
+    (is (str/includes? out "       yhat if contains?(y, :turnover):\n              :turnover(y)\n            else:\n              y\n            end]:"))
+    (is (roundtrips? forms))))
+
+(deftest test-numeric-equality-infix
+  (is (= "a == b" (core/forms->sup ['(== a b)])))
+  (is (roundtrips? '[(== a 0.0) (== a b c) (f ==) (== (== a b) true)])))

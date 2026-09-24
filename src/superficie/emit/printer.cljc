@@ -359,22 +359,31 @@
 (defn- print-binding-vec
   "Print a binding vector with a comma between each name-value pair.
    [x 1 y 2] → [x 1, y 2]    [x xs :when p y ys] → [x xs, :when p, y ys]
-   Under the pretty-printer, a vector that would overflow the line puts one
-   pair per line, aligned after '[' (head-str is the block word before it)."
+   A vector that would overflow the line (under the pretty-printer), or that
+   holds a multi-line value such as an `if` block, puts one pair per line,
+   aligned after '[' (head-str is the block word before it); a block value is
+   indented from the column where the value starts."
   ([bindings] (print-binding-vec bindings nil))
   ([bindings head-str]
    (if (even? (count bindings))
-     (let [pairs (map (fn [[k v]] (str (print-form k)
-                                       ;; `[rem mod(x, y)]` would read as infix
-                                       (if (or (operator-arg? k) (operator-arg? v)) ", " " ")
-                                       (print-form v)))
-                      (partition 2 bindings))
-           flat (str "[" (str/join ", " pairs) "]")
-           start (+ (count *indent*) (count (or head-str "")) 2)]
-       (if (and *width* head-str (> (count pairs) 1)
-                (or (> (+ start (count flat)) *width*)
-                    (str/includes? flat "\n")))
-         (str "[" (str/join (str ",\n" (apply str (repeat start " "))) pairs) "]")
+     (let [kvs (partition 2 bindings)
+           sep (fn [k v] (if (or (operator-arg? k) (operator-arg? v)) ", " " "))
+           ;; `[rem mod(x, y)]` would read as infix — hence the comma separator
+           flat-pairs (map (fn [[k v]] (str (print-form k) (sep k v) (print-form v))) kvs)
+           flat (str "[" (str/join ", " flat-pairs) "]")
+           start (+ (count *indent*) (count (or head-str "")) 2)
+           multi-line-value? (str/includes? flat "\n")]
+       (if (and head-str (> (count kvs) 0)
+                (or multi-line-value?
+                    (and *width* (> (count kvs) 1) (> (+ start (count flat)) *width*))))
+         (let [pairs (map (fn [[k v]]
+                            (let [ks (print-form k)
+                                  s (sep k v)
+                                  vcol (+ start (count ks) (count s))]
+                              (str ks s (binding [*indent* (apply str (repeat vcol " "))]
+                                          (print-form v)))))
+                          kvs)]
+           (str "[" (str/join (str ",\n" (apply str (repeat start " "))) pairs) "]"))
          flat))
      (str "[" (join-forms bindings) "]"))))
 

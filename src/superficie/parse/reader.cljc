@@ -1491,35 +1491,36 @@
   "Parse: head header-form... : body... end
    The header is every form before ':' and the body every form before 'end'.
    The shape is only consulted to re-nest a :wrap? slot (see superficie.shapes)."
-  [p form-sym qsym tok]
+  [p form-sym qsym tok colon-in-kw?]
   (let [outer-dotted @(:dotted-calls p)]
     (when (:dotted-calls (shapes/shape-options qsym))
       (vreset! (:dotted-calls p) true))
     (try
-      (parse-shape-block* p form-sym qsym tok)
+      (parse-shape-block* p form-sym qsym tok colon-in-kw?)
       (finally (vreset! (:dotted-calls p) outer-dotted)))))
 
 (defn- parse-shape-block*
-  [p form-sym qsym tok]
+  [p form-sym qsym tok colon-in-kw?]
   (let [shape (shapes/shape-for qsym)
         loc (select-keys tok [:line :col])
         name-first? (= :name (shapes/first-slot shape))
-        header (loop [header []]
-                 (cond
-                   (peof? p)
-                   (errors/reader-error (str "Expected ':' to end the " form-sym " header")
-                                        (error-data p (assoc loc :incomplete true)))
-                   (colon-tok? (ppeek p)) (do (padvance! p) header)
-                   :else
-                   (let [f (if (and name-first? (empty? header))
-                             (parse-name-form p)
-                             (parse-form p))]
-                     (cond
-                       (discard-sentinel? f) (recur header)
-                       (and (or (symbol? f) (keyword? f))
-                            (str/ends-with? (name f) ":"))
-                       (conj header (first (strip-expr-colon f)))
-                       :else (recur (conj header f))))))
+        ;; `spin:` — the colon came fused with the head, so the header is empty
+        header (if colon-in-kw? [] (loop [header []]
+                                     (cond
+                                       (peof? p)
+                                       (errors/reader-error (str "Expected ':' to end the " form-sym " header")
+                                                            (error-data p (assoc loc :incomplete true)))
+                                       (colon-tok? (ppeek p)) (do (padvance! p) header)
+                                       :else
+                                       (let [f (if (and name-first? (empty? header))
+                                                 (parse-name-form p)
+                                                 (parse-form p))]
+                                         (cond
+                                           (discard-sentinel? f) (recur header)
+                                           (and (or (symbol? f) (keyword? f))
+                                                (str/ends-with? (name f) ":"))
+                                           (conj header (first (strip-expr-colon f)))
+                                           :else (recur (conj header f)))))))
         body (parse-body p)]
     (when-not (end-symbol? (ppeek p))
       (errors/reader-error (str "Expected 'end' to close " form-sym " block")
@@ -1562,7 +1563,7 @@
    Used by both parse-block (built-in dispatch) and the :resolve-var hook path."
   [p block-kind form-sym tok colon-in-kw? & [qsym]]
   (case block-kind
-    :shape-block (parse-shape-block p form-sym qsym tok)
+    :shape-block (parse-shape-block p form-sym qsym tok colon-in-kw?)
     :defn-block  (parse-defn-block  p form-sym tok)
     :fn-block    (parse-fn-block    p form-sym tok colon-in-kw?)
     :if-block    (parse-if-block    p form-sym tok)
