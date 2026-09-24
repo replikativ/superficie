@@ -345,6 +345,40 @@
                             ": ")]
             (str prefix (pp (first rest2) (+ col (count prefix)) width))))))))
 
+(defn- infix-chain
+  "The operands and operators of an infix expression as one chain of
+   [operator operand] pieces (the first operator is nil). A left operand at the
+   same precedence printed without parens — (+ a b) under - in a + b - c — is
+   part of the same visual chain and is expanded into it."
+  [form]
+  (let [[op strs] (printer/infix-parts form)
+        a0 (second form)
+        s0 (first strs)
+        head (if (and (= (printer/infix-prec a0) (printer/infix-prec form))
+                      (not (str/starts-with? s0 "(")))
+               (infix-chain a0)
+               [[nil s0]])]
+    (into head (map (fn [s] [op s]) (rest strs)))))
+
+(defn- pp-infix
+  "Pretty-print an infix expression that does not fit: break before operators,
+   operands aligned at the first one's column (col). nil when an operand spans
+   lines, so the caller falls back."
+  [form col width]
+  (when (printer/infix-parts form)
+    (let [chain (infix-chain form)]
+      (when (not-any? (fn [[_ x]] (str/includes? x "\n")) chain)
+        (let [indent (indent-str col)]
+          (loop [[[op x] & more] (rest chain)
+                 line (second (first chain))
+                 lines []]
+            (if-not x
+              (str/join (str "\n" indent) (conj lines line))
+              (let [piece (str op " " x)]
+                (if (> (+ col (count line) 1 (count piece)) width)
+                  (recur more piece (conj lines line))
+                  (recur more (str line " " piece) lines))))))))))
+
 (defn- pp-call-smart
   "Pretty-print a call, keeping leading args with the head when appropriate.
    Uses line-hints for arg placement when available, fill otherwise."
@@ -521,6 +555,11 @@
 
                     (and (call? form) (symbol? (first form)) (block-form? (first form)))
                     (binding [printer/*indent* (indent-str col)] (flat form))
+
+                    ;; Infix that does not fit — break before operators
+                    (and (call? form) (printer/infix-form? form)
+                         (> (+ col (count (flat form))) width))
+                    (or (pp-infix form col width) (pp-call-smart form col width))
 
                     ;; Non-block calls — width-aware formatting
                     (call? form)

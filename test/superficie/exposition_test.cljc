@@ -138,3 +138,13 @@
 (deftest test-numeric-equality-infix
   (is (= "a == b" (core/forms->sup ['(== a b)])))
   (is (roundtrips? '[(== a 0.0) (== a b c) (f ==) (== (== a b) true)])))
+
+(deftest test-long-infix-breaks-before-operators
+  (let [form '(- (+ (aget U (+ (* ym W) x)) (aget U (+ (* yp W) x))
+                    (aget U (+ (* y W) xm)) (aget U (+ (* y W) xp)))
+                 (* c u))
+        out (core/pprint-sup [form] {:width 50})]
+    (testing "a same-precedence chain breaks before its operators, aligned"
+      (is (str/includes? out "\n+ aget(U, y * W + xm)"))
+      (is (str/includes? out "\n- c * u")))
+    (is (= [form] (core/sup->forms out)))))

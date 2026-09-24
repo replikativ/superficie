@@ -32,7 +32,15 @@ Superficie has three whitespace modes:
 | `sp`  | spaces and tabs only | around infix operators |
 | `eol` | at least one newline | between body expressions |
 
-The distinction between `sp` and `_` is critical: infix operators require spaces/tabs (not newlines) on each side. This is how `my-func` (one symbol with a dash) is distinguished from `a - b` (subtraction with spaces).
+Infix operators need whitespace on each side. This is how `my-func` (one symbol with a dash) is distinguished from `a - b` (subtraction with spaces). The whitespace may include a line break, so a long expression continues on the next line, before or after an operator — the pretty-printer breaks before operators, aligned under the first operand:
+
+```
+lap-u float(aget(U, ym * W + x) + aget(U, yp * W + x)
+            + aget(U, y * W + xm) + aget(U, y * W + xp)
+            - float(4.0) * u)
+```
+
+An operator preceded by a comma is not infix: in `f(a, +, b)` the `+` is a symbol argument.
 
 ### Body Structure
 
@@ -42,7 +50,7 @@ Block bodies contain one expression per line:
 body = (eol expr)+
 ```
 
-Multi-line expressions work via pipe operators which consume the leading newline:
+Multi-line expressions continue across line breaks around infix operators (see Whitespace), including the pipe operators:
 
 ```clojure
 users
