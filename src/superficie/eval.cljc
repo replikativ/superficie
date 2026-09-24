@@ -8,6 +8,7 @@
             [superficie.parse.reader :as reader]
             [superficie.parse.expander :as expander]
             [superficie.emit.printer :as printer]
+            [superficie.errors :as errors]
             [clojure.string :as str]
             #?(:clj [superficie.runtime :as runtime])))
 
@@ -123,6 +124,33 @@
 ;; superficie source evaluator
 ;; ---------------------------------------------------------------------------
 
+(defn- root-cause [e]
+  (if-let [c (ex-cause e)] (recur c) e))
+
+(defn- eval-with-hints
+  "Eval form; when it fails on an unresolved symbol that looks like a typing
+   slip (`W-1`, `True`, `elif`), rethrow with a :hint and the form's location.
+   Other failures propagate unchanged."
+  [eval-fn form]
+  (try
+    (eval-fn form)
+    (catch #?(:clj Throwable :cljs :default) e
+      (let [sym  (errors/unresolved-symbol (ex-message (root-cause e)))
+            hint (when sym
+                   (errors/unresolved-symbol-hint
+                    sym form
+                    (fn [s] #?(:clj (some? (try (resolve (symbol s)) (catch Exception _ nil)))
+                               :cljs false))))]
+        (if hint
+          (let [loc (or (some #(when (and (symbol? %) (= sym (str %)) (:line (meta %))) (meta %))
+                              (tree-seq coll? seq form))
+                        (meta form))]
+            (throw (ex-info (str "Unable to resolve symbol: " sym)
+                            (cond-> {:hint hint}
+                              (:line loc) (assoc :line (:line loc) :col (:column loc)))
+                            e)))
+          (throw e))))))
+
 (defn eval-string
   "Read and eval a superficie source string, one form at a time.
    Each form is evaluated before the next is parsed so macros and
@@ -161,7 +189,7 @@
            (if (reader/discarded? raw)
              (recur result)
              (let [form   (first (expander/expand-forms [raw] reader-opts))
-                   evaled (eval-fn form)]
+                   evaled (eval-with-hints eval-fn form)]
                #?(:clj (register-block-from-form! form))
                #?(:clj (when clj-writer
                          (.write ^java.io.Writer clj-writer (pr-str form))

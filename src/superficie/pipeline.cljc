@@ -11,7 +11,8 @@
   (:require [superficie.scan.tokenizer  :as tokenizer]
             [superficie.scan.grouper    :as grouper]
             [superficie.parse.enforest  :as enforest]
-            [superficie.parse.reader    :as reader]))
+            [superficie.parse.reader    :as reader]
+            [superficie.errors          :as errors]))
 
 (defn scan
   "Tokenize source text. Attaches leading whitespace/comments as :ws on each token."
@@ -36,12 +37,31 @@
            :shrubbery   shrub
            :group-errors (vec (grouper/grouper-errors shrub)))))
 
+(defn- throw-group-error!
+  "Report a structural (bracket) error at its own location. Unless the caller
+   asked for resilient parsing, an unbalanced bracket is an error: healing it
+   silently would change what the program means."
+  [ctx {:keys [message loc actual-close open-type]}]
+  (errors/reader-error
+   message
+   (cond-> {:line (:line loc) :col (:col loc) :source (:source ctx)}
+     (nil? actual-close) (assoc :incomplete true)
+     (and open-type (nil? actual-close))
+     (assoc :hint "Add the missing closing delimiter, or remove the one opened here")
+     (and open-type actual-close (:line actual-close))
+     (assoc :secondary [{:line (:line actual-close) :col (:col actual-close)
+                         :label "found this instead"}]))))
+
 (defn parse
   "Enforest the shrubbery into Clojure forms.
-   Heals structural errors so the reader can process a well-formed token stream."
+   Structural errors from the grouper are thrown at their location. With
+   {:resilient true} in the ctx they are healed instead, so the reader can
+   still process a well-formed token stream (see run-resilient)."
   [ctx]
   (when-not (:shrubbery ctx)
     (throw (ex-info "Pipeline :shrubbery missing — run group before parse" {})))
+  (when-let [ge (and (not (:resilient ctx)) (first (:group-errors ctx)))]
+    (throw-group-error! ctx ge))
   (assoc ctx :forms
          (enforest/enforest-forms (:shrubbery ctx) (:opts ctx) (:source ctx))))
 
@@ -57,6 +77,6 @@
    structural errors from the grouper, reported without throwing."
   ([source]       (run-resilient source nil))
   ([source opts]
-   (let [ctx (run source opts)]
+   (let [ctx (-> {:source source :opts opts :resilient true} scan group parse)]
      {:forms       (:forms ctx)
       :errors      (:group-errors ctx)})))

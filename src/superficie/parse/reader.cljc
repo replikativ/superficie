@@ -6,7 +6,9 @@
             [superficie.forms :as forms]
             [superficie.operators :as ops]
             [superficie.parse.expander :as expander]
-            [superficie.parse.resolve :as resolve]))
+            [superficie.parse.resolve :as resolve]
+            [superficie.shapes :as shapes]
+            [superficie.parse.diagnose :as diagnose]))
 
 ;; Sentinel for #_ discard. Contract:
 ;; - Returned by `parse-form-base` (via `:discard`) when the parsed form was a #_ discard
@@ -39,7 +41,16 @@
     :opts opts :source source :sq-depth (volatile! 0)
     :sexp-mode      (volatile! false)  ; true inside '(...) quoted lists
     :no-block       (volatile! false)  ; true immediately inside 'form (suppresses block dispatch)
-    :bracket-depth  (volatile! 0)}))   ; > 0 when inside [...] — suppresses block dispatch
+    :bracket-depth  (volatile! 0)      ; > 0 when inside [...] — suppresses block dispatch
+    ;; aliases/refers from the file's ns form — resolves `a/defn`, referred `deftm`
+    :ns-ctx         (volatile! (:ns-context opts))
+    ;; block words read as plain symbols though a header followed on their
+    ;; line — the likely cause of a later 'end' error (missing ':')
+    :unstarted      (volatile! [])
+    ;; true inside ns clauses: libspecs are data, so `[+ - *]` is three symbols
+    :no-infix       (volatile! false)
+    ;; true inside a block whose shape has :dotted-calls — A.b(x) is (A.b x)
+    :dotted-calls   (volatile! false)}))
 
 (defn- peof? [{:keys [tokens pos]}]
   (>= @pos (count tokens)))
@@ -623,11 +634,12 @@
         ;; Consume ':'
         _ (let [next-tok (ppeek p)]
             (cond
+              ;; Colon was already inside the condition expression. Checked first:
+              ;; the next token then belongs to the body (e.g. a `try:` block).
+              colon-in-cond nil
               ;; Next token is a word ending with ':' (fused, like "then:") — skip
               (and (tok-type? next-tok :symbol) (str/ends-with? (:value next-tok) ":"))
               (padvance! p)
-              ;; Colon was already inside the condition expression
-              colon-in-cond nil
               ;; Standalone ':' keyword
               :else
               (consume-colon! p false "if" (select-keys tok [:line :col]))))
@@ -848,6 +860,12 @@
         (if (and (not colon-in-name) (tok-type? (ppeek p) :string))
           (let [d (parse-expr p)] (strip-expr-colon d))
           [nil false])
+        _ (when (and (not (or colon-in-name colon-in-doc)) (adjacent-open-paren? p))
+            (errors/reader-error
+             (str "Expected ':' after the " (name form-sym) " name")
+             (error-data p (assoc (select-keys (ppeek p) [:line :col])
+                                  :hint (str "`" (name form-sym) "` binds a value — for a function write `defn "
+                                             name-sym " [params]:`")))))
         _ (consume-colon! p (or colon-in-name colon-in-doc)
                           (name form-sym) (select-keys tok [:line :col]))
         value (parse-expr p)]
@@ -873,12 +891,16 @@
    Stops at the next sub-clause keyword, 'end', or EOF.
    Each item is a full expression (vector, symbol, keyword, etc.)."
   [p]
-  (loop [items []]
-    (if (or (peof? p)
-            (end-symbol? (ppeek p))
-            (ns-sub-clause? (ppeek p)))
-      items
-      (recur (conj items (parse-expr p))))))
+  (let [outer @(:no-infix p)]
+    (vreset! (:no-infix p) true)
+    (try
+      (loop [items []]
+        (if (or (peof? p)
+                (end-symbol? (ppeek p))
+                (ns-sub-clause? (ppeek p)))
+          items
+          (recur (conj items (parse-expr p)))))
+      (finally (vreset! (:no-infix p) outer)))))
 
 (defn- parse-ns-block
   "Parse: ns name [\"docstring\"] [{attr-map}]:
@@ -1213,7 +1235,78 @@
   [p base-str]
   (let [resolve-sym (:resolve-sym (:opts p))]
     (or (when resolve-sym (resolve-sym base-str))
+        (shapes/resolve-static (symbol base-str) @(:ns-ctx p))
         (get block-name->sym base-str))))
+
+(defn- block-kind-of
+  "Block kind for a resolved head: a built-in kind, or :shape-block when a
+   shape descriptor is registered for it."
+  [qsym]
+  (when qsym
+    (or (get @block-dispatch qsym)
+        (when (shapes/shape-for qsym) :shape-block))))
+
+(defn- header-colon-on-line?
+  "Scan ahead for the ':' that ends a shape-block header. The header must stay
+   on the head's line except inside brackets, so a header whose ':' is missing
+   never borrows the ':' of a later block. A token's end line counts, so a
+   multi-line docstring may precede the rest of the header. Stops at closers
+   and 'end'."
+  [p]
+  (let [{:keys [tokens pos]} p
+        start @pos
+        head-line (:line (nth tokens (dec start) nil))]
+    (loop [i start depth 0 prev-line head-line]
+      (let [tok (nth tokens i nil)]
+        (cond
+          (nil? tok) false
+          (zero? depth)
+          (cond
+            (and prev-line (:line tok) (not= prev-line (:line tok))) false
+            (colon-tok? tok) true
+            (and (tok-type? tok :symbol) (str/ends-with? (:value tok) ":")
+                 (not= ":" (:value tok))) true
+            (closer-types (:type tok)) false
+            (end-symbol? tok) false
+            (#{:open-paren :open-bracket :open-brace :open-set :open-anon-fn} (:type tok))
+            (recur (inc i) 1 (or (:end-line tok) (:line tok) prev-line))
+            :else (recur (inc i) 0 (or (:end-line tok) (:line tok) prev-line)))
+          :else
+          ;; Closers synthesized by the grouper carry no :line — keep the last known one.
+          (recur (inc i)
+                 (cond
+                   (#{:open-paren :open-bracket :open-brace :open-set :open-anon-fn} (:type tok)) (inc depth)
+                   (closer-types (:type tok)) (dec depth)
+                   :else depth)
+                 (or (:end-line tok) (:line tok) prev-line)))))))
+
+(defn- shape-start?
+  "True when the tokens after a shaped head form a block header: the first
+   token fits the shape's first slot and the header's ':' is on the head's line."
+  [p shape colon-in-tok?]
+  (if colon-in-tok?
+    (not (shapes/requires-header? shape))
+    (let [next (ppeek p)
+          wrap-sym (let [s (first shape)]
+                     (when (and (vector? s) (= :wrap? (first s))) (str (second s))))
+          fits? (fn [kind]
+                  (case kind
+                    :params (or (tok-type? next :open-bracket) (tok-type? next :meta))
+                    :name (or (tok-type? next :meta)
+                              (tok-type? next :unquote)
+                              (and (tok-type? next :symbol)
+                                   (not (contains? @ops/*surface-index* (:value next)))))
+                    :body (colon-tok? next)
+                    (and next
+                         (not (closer-types (:type next)))
+                         (not (arrow-tok? next))
+                         (not (colon-tok? next))
+                         (not (and (tok-type? next :symbol)
+                                   (contains? @ops/*surface-index* (:value next)))))))]
+      (and next
+           (or (fits? (shapes/first-slot shape))
+               (and wrap-sym (sym-value? next wrap-sym)))
+           (or (colon-tok? next) (header-colon-on-line? p))))))
 
 (defn- has-colon-before-close?
   "Scan ahead (without consuming) to find ':' at bracket-nesting depth 0
@@ -1373,8 +1466,51 @@
   "True when the parser state after consuming a block keyword looks like a block form.
    Resolves the name to a qualified sym, looks up block-kind, delegates to block-kind->start?."
   [p kw-str colon-in-tok?]
-  (let [qsym (resolve-block-qsym p kw-str)]
-    (block-kind->start? p (when qsym (get @block-dispatch qsym)) colon-in-tok?)))
+  (let [qsym (resolve-block-qsym p kw-str)
+        kind (block-kind-of qsym)]
+    (if (= :shape-block kind)
+      (shape-start? p (shapes/shape-for qsym) colon-in-tok?)
+      (block-kind->start? p kind colon-in-tok?))))
+
+(declare parse-shape-block*)
+
+(defn- parse-shape-block
+  "Parse: head header-form... : body... end
+   The header is every form before ':' and the body every form before 'end'.
+   The shape is only consulted to re-nest a :wrap? slot (see superficie.shapes)."
+  [p form-sym qsym tok]
+  (let [outer-dotted @(:dotted-calls p)]
+    (when (:dotted-calls (shapes/shape-options qsym))
+      (vreset! (:dotted-calls p) true))
+    (try
+      (parse-shape-block* p form-sym qsym tok)
+      (finally (vreset! (:dotted-calls p) outer-dotted)))))
+
+(defn- parse-shape-block*
+  [p form-sym qsym tok]
+  (let [shape (shapes/shape-for qsym)
+        loc (select-keys tok [:line :col])
+        header (loop [header []]
+                 (cond
+                   (peof? p)
+                   (errors/reader-error (str "Expected ':' to end the " form-sym " header")
+                                        (error-data p (assoc loc :incomplete true)))
+                   (colon-tok? (ppeek p)) (do (padvance! p) header)
+                   :else
+                   (let [f (parse-form p)]
+                     (cond
+                       (discard-sentinel? f) (recur header)
+                       (and (or (symbol? f) (keyword? f))
+                            (str/ends-with? (name f) ":"))
+                       (conj header (first (strip-expr-colon f)))
+                       :else (recur (conj header f))))))
+        body (parse-body p)]
+    (when-not (end-symbol? (ppeek p))
+      (errors/reader-error (str "Expected 'end' to close " form-sym " block")
+                           (error-data p (assoc (plast-loc p)
+                                                :secondary [(assoc loc :label (str form-sym " opened here"))]))))
+    (padvance! p)
+    (apply list form-sym (shapes/join shape header body))))
 
 (defn- parse-match-block
   "Parse: match expr: pat1 => result1  pat2 => result2  [_ => default] end
@@ -1408,8 +1544,9 @@
 (defn- parse-block-by-kind
   "Dispatch block parsing given an explicit block-kind and resolved form symbol.
    Used by both parse-block (built-in dispatch) and the :resolve-var hook path."
-  [p block-kind form-sym tok colon-in-kw?]
+  [p block-kind form-sym tok colon-in-kw? & [qsym]]
   (case block-kind
+    :shape-block (parse-shape-block p form-sym qsym tok)
     :defn-block  (parse-defn-block  p form-sym tok)
     :fn-block    (parse-fn-block    p form-sym tok colon-in-kw?)
     :if-block    (parse-if-block    p form-sym tok)
@@ -1436,8 +1573,8 @@
   ([p kw-str tok] (parse-block p kw-str tok false))
   ([p kw-str tok colon-in-kw?]
    (let [qsym (or (resolve-block-qsym p kw-str) (symbol kw-str))
-         kind (get @block-dispatch qsym)]
-     (parse-block-by-kind p kind (symbol (name qsym)) tok colon-in-kw?))))
+         kind (block-kind-of qsym)]
+     (parse-block-by-kind p kind (symbol kw-str) tok colon-in-kw? qsym))))
 
 ;; ---------------------------------------------------------------------------
 ;; Surface syntax: let-statement sugar
@@ -1515,12 +1652,15 @@
    (namespace-aware, JVM only) or falls back to the static *surface-index*.
    Produces forms with fully-qualified operator heads."
   [p left min-prec]
-  (if @(:sexp-mode p)
-    left ; no infix inside quoted lists
+  (if (or @(:sexp-mode p) @(:no-infix p))
+    left ; no infix inside quoted lists or ns clauses
     (loop [left left]
       (let [tok      (ppeek p)
             next-tok (ppeek p 1)]
-        (if-not (infix-tok? tok next-tok)
+        (if-not (and (infix-tok? tok next-tok)
+                     ;; a comma ends an argument: in f(a, +, b) the + is a
+                     ;; symbol argument, never infix (commas in comments don't count)
+                     (not (str/includes? (str/replace (or (:ws tok) "") #";[^\n]*" "") ",")))
           left
           (let [op-str      (:value tok)
                 resolve-sym (:resolve-sym (:opts p))
@@ -1562,7 +1702,10 @@
   (if (and (bind-op? (ppeek p))
            (symbol? sym)
            (nil? (namespace sym))
-           (not (contains? @ops/*surface-index* (name sym))))
+           (not (contains? @ops/*surface-index* (name sym)))
+           ;; `x:` ends a block header (colon fused into the symbol); a ':='
+           ;; after it starts the body, e.g. a `case op:` arm `:= => ...`
+           (not (str/ends-with? (name sym) ":")))
     (do (padvance! p) ; consume :=
         (let [val (parse-expr p)]
           [let-stmt-tag sym val]))
@@ -1591,6 +1734,8 @@
           (let [class-tok (ppeek p)
                 paren-tok (ppeek p 1)]
             (if (and (tok-type? class-tok :symbol)
+                     ;; `new, Foo(x)` is a symbol argument followed by a call
+                     (not (re-find #"[,\n]" (or (:ws class-tok) "")))
                      (tok-type? paren-tok :open-paren)
                      (not (:ws paren-tok)))
               (do
@@ -1617,7 +1762,9 @@
 
               ;; Interop method call: obj.method(args) → (.method obj args)
               ;; Only when adjacent to ( and symbol contains internal dot (not starting/ending with dot)
+              ;; Not inside a :dotted-calls block, where A.b(x) is the plain call (A.b x)
               (and (some? dot-idx) (pos? dot-idx)
+                   (not @(:dotted-calls p))
                    (not (str/ends-with? s "."))
                    (not (str/starts-with? s "."))
                    (not (str/includes? s "/"))
@@ -1644,10 +1791,19 @@
                                   @(:no-block p)
                                   @(:sexp-mode p))
                     qsym      (when-not suppress? (resolve-block-qsym p base-str))
-                    kind      (when qsym (get @block-dispatch qsym))]
-                (if (and kind (block-kind->start? p kind colon-in-tok?))
-                  (parse-block-by-kind p kind (symbol (name qsym)) tok colon-in-tok?)
-                  (maybe-parse-let-stmt p (maybe-call p (symbol s)))))))))
+                    kind      (block-kind-of qsym)]
+                (if (and kind (if (= :shape-block kind)
+                                (shape-start? p (shapes/shape-for qsym) colon-in-tok?)
+                                (block-kind->start? p kind colon-in-tok?)))
+                  ;; The head is emitted as written (`a/defn` stays `a/defn`).
+                  (parse-block-by-kind p kind (symbol base-str) tok colon-in-tok? qsym)
+                  (do
+                    (when (and kind (not colon-in-tok?)
+                               (let [nt (ppeek p)]
+                                 (and nt (= (:line nt) (:line tok))
+                                      (not (closer-types (:type nt))))))
+                      (vswap! (:unstarted p) conj {:word base-str :line (:line tok) :col (:col tok)}))
+                    (maybe-parse-let-stmt p (maybe-call p (symbol s))))))))))
 
       :keyword
       (let [v (:value tok)]
@@ -1996,6 +2152,59 @@
 ;; Public API
 ;; ---------------------------------------------------------------------------
 
+(def ^:private block-error-re
+  #"'end'|'else'|'catch'|'finally'|Expected ':'")
+
+(defn- enrich-block-error
+  "Add hints to a block-structure error: a block word that was read as a plain
+   symbol because its header lacked ':', and an indentation diagnosis of which
+   block is missing its 'end'. Errors that already carry a hint are kept."
+  [p e]
+  (let [data (ex-data e)]
+    (if (or (:hint data) (not (re-find block-error-re (or (ex-message e) ""))))
+      e
+      (let [line (:line data)
+            unstarted (last (filter #(or (nil? line) (<= (:line %) line)) @(:unstarted p)))
+            indent (diagnose/end-hint (:tokens p))
+            hint (cond
+                   unstarted
+                   {:hint (str "`" (:word unstarted) "` at line " (:line unstarted)
+                               " was read as a plain symbol, not a block: its header needs ':'"
+                               " at the end of the line")
+                    :secondary [{:line (:line unstarted) :col (:col unstarted)
+                                 :label "header without ':'"}]}
+                   indent indent)]
+        (if hint
+          (ex-info (ex-message e)
+                   (-> data
+                       (assoc :hint (:hint hint))
+                       (update :secondary (fnil into [])
+                               ;; never repeat the primary location
+                               (remove #(and (= line (:line %)) (= (:col data) (:col %)))
+                                       (:secondary hint))))
+                   (ex-cause e))
+          e)))))
+
+(def ^:private stray-terminators
+  #{"end" "else" "else:" "catch" "catch:" "finally" "finally:"})
+
+(defn- parse-top-level!
+  "Parse one top-level form; an ns form updates the static namespace context.
+   A block terminator here closes nothing and is an error, never a symbol."
+  [p]
+  (try
+    (let [tok (ppeek p)]
+      (when (and (tok-type? tok :symbol) (stray-terminators (:value tok)))
+        (errors/reader-error (str "Unexpected '" (str/replace (:value tok) #":$" "")
+                                  "' — no block is open here")
+                             (error-data p (select-keys tok [:line :col]))))
+      (let [form (parse-expr p)]
+        (when-let [ctx (shapes/ns-context form @(:ns-ctx p))]
+          (vreset! (:ns-ctx p) ctx))
+        form))
+    (catch #?(:clj clojure.lang.ExceptionInfo :cljs ExceptionInfo) e
+      (throw (enrich-block-error p e)))))
+
 (defn parse-tokens
   "Parse pre-tokenized, pre-grouped tokens into Clojure forms.
    Used by the pipeline; most callers should use superficie.core/sup->forms instead."
@@ -2007,7 +2216,7 @@
          raw-forms (loop [forms []]
                      (if (peof? p)
                        forms
-                       (let [form (parse-expr p)]
+                       (let [form (parse-top-level! p)]
                          (cond
                            (discard-sentinel? form) (recur forms)
                            (splice-result? form) (recur (into forms form))
@@ -2035,7 +2244,7 @@
   "Read one top-level form from the streaming parser.
    Returns the form, or the discard sentinel for #_ forms (check with discarded?)."
   [p]
-  (parse-expr p))
+  (parse-top-level! p))
 
 (defn discarded?
   "True if the value returned by parse-next! was a #_ discarded form."

@@ -94,3 +94,45 @@
                                    (apply str (repeat (dec csc) " ")) "^ " label))))))
      (when hint (vswap! out conj (str "\nHint: " hint)))
      (apply str @out))))
+
+;; ---------------------------------------------------------------------------
+;; Hints for unresolved symbols (eval time)
+;; ---------------------------------------------------------------------------
+
+(def ^:private habit-hints
+  "Words people type from other languages, with the superficie equivalent."
+  {"True"   "write `true`"
+   "False"  "write `false`"
+   "None"   "write `nil`"
+   "null"   "write `nil`"
+   "elif"   "write `else:` followed by a nested `if`, or use a `cond:` block"
+   "return" "there is no `return` — a block's last expression is its value"
+   "len"    "write `count(xs)`"})
+
+(defn- symbol-names
+  "Names of all symbols occurring in form (bindings, locals, calls)."
+  [form]
+  (into #{}
+        (comp (filter symbol?) (map name))
+        (tree-seq coll? seq form)))
+
+(defn unresolved-symbol-hint
+  "A hint for a symbol the compiler could not resolve, or nil.
+   `known?` tells whether a name resolves in the current namespace.
+   Catches operators typed without spaces (`W-1`, `a+b`), which read as a
+   single name, and habits from other languages (`True`, `elif`, `return`)."
+  [sym-str form known?]
+  (or (get habit-hints sym-str)
+      (let [parts (str/split sym-str #"(?<=.)[-+*](?=.)")
+            names (symbol-names form)
+            known-part? (fn [s] (or (re-matches #"\d+(\.\d+)?" s)
+                                    (contains? names s)
+                                    (known? s)))]
+        (when (and (> (count parts) 1) (every? known-part? parts))
+          (let [spaced (str/replace sym-str #"(?<=.)([-+*])(?=.)" " $1 ")]
+            (str "`" sym-str "` is read as one name — operators need spaces: `" spaced "`"))))))
+
+(defn unresolved-symbol
+  "The symbol name in an 'Unable to resolve symbol' message, or nil."
+  [msg]
+  (second (re-find #"(?:Unable to|Could not) resolve symbol: (\S+)" (or msg ""))))

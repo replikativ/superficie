@@ -92,13 +92,6 @@
   (cond
     (forms/raw? x)  (normalize-for-eq (forms/raw-value x))
     (instance? java.util.regex.Pattern x) (.pattern ^java.util.regex.Pattern x)
-    ;; Qualified operator symbol emitted by printer in value positions → unqualified
-    ;; Also handles operators with :str override (e.g. clojure.core/-> whose surface string is ".>")
-    (and (symbol? x)
-         (namespace x)
-         (or (= x (get @superficie.operators/*surface-index* (name x)))
-             (contains? @superficie.operators/*op-registry* x)))
-    (symbol (name x))
     ;; Unqualified surface-string operator (e.g. ".>" for ->, "|>" for ->>) emitted by
     ;; printer inside syntax-quotes → resolve via surface-index and take the canonical name.
     (and (symbol? x)

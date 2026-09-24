@@ -5,6 +5,7 @@
      .reset()      — clear all defs and restart the context"
   (:require [superficie.core :as core]
             [superficie.operators :as ops]
+            [superficie.errors :as errors]
             [superficie.parse.expander :as expander]
             [sci.core :as sci]
             [clojure.string :as str]))
@@ -122,6 +123,26 @@
 ;; Evaluation
 ;; ---------------------------------------------------------------------------
 
+(defn- eval-form-with-hint
+  "Eval one form; an unresolved symbol that looks like a typing slip
+   (`W-1`, `True`, `elif`) is rethrown with a hint and its location."
+  [form]
+  (try
+    (sci/eval-form @ctx form)
+    (catch :default e
+      (let [sym  (errors/unresolved-symbol (ex-message e))
+            hint (when sym (errors/unresolved-symbol-hint sym form (constantly false)))
+            loc  (when hint
+                   (or (some #(when (and (symbol? %) (= sym (str %)) (:line (meta %))) (meta %))
+                             (tree-seq coll? seq form))
+                       (meta form)))]
+        (throw (if hint
+                 (ex-info (str "Unable to resolve symbol: " sym)
+                          (cond-> {:hint hint}
+                            (:line loc) (assoc :line (:line loc) :col (:column loc)))
+                          e)
+                 e))))))
+
 (defn eval-sup
   "Parse and evaluate a superficie source string in the SCI context.
    Returns a JS object with:
@@ -132,13 +153,16 @@
   (reset! out-buf [])
   (try
     (let [forms  (expander/expand-forms (core/sup->forms src))
-          result (reduce (fn [_ form] (sci/eval-form @ctx form)) nil forms)
+          result (reduce (fn [_ form] (eval-form-with-hint form)) nil forms)
           output (str/join @out-buf)]
       #js {:result (pr-str result) :output output :error nil})
     (catch :default e
       #js {:result nil
            :output (str/join @out-buf)
-           :error  (or (.-message e) (str e))})))
+           ;; source context, underline and hint for parse and typing errors
+           :error  (if (instance? ExceptionInfo e)
+                     (errors/format-error e src)
+                     (or (.-message e) (str e)))})))
 
 (defn reset-ctx!
   "Clear all definitions and restart the SCI context."
