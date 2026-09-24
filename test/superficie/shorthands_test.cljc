@@ -100,7 +100,7 @@
   (testing "a store in value position is parenthesized"
     (let [forms [kernel-ns '(deftm f [U :- Long] :- Long (+ 1 (aset U 0 1)) (let [x (aset U 0 1)] x))]]
       (is (str/includes? (core/pprint-sup forms) "1 + (U[0] <- 1)"))
-      (is (str/includes? (core/pprint-sup forms) "let [x (U[0] <- 1)]:"))
+      (is (str/includes? (core/pprint-sup forms) "x := (U[0] <- 1)"))
       (is (roundtrips? forms))))
   (testing "a long value breaks after the arrow"
     (let [forms [kernel-ns '(deftm f [U :- Long] :- Long
@@ -122,8 +122,48 @@
     (is (= '[[x := y] (f x := 1) {x :=} (quote [x := y])]
            (core/sup->forms "[x := y]\n\nf(x, :=, 1)\n\n{x :=}\n\n'[x := y]")))
     (is (roundtrips? '[[x := y] (f x := 1) {x :=} (quote [x := y]) (do x := y)])))
-  (testing "at top level it is an error"
-    (is (thrown? #?(:clj Exception :cljs js/Error) (core/sup->forms "x := 1")))))
+  (testing "at top level it is an error, and so is the old `let x :=`"
+    (is (thrown? #?(:clj Exception :cljs js/Error) (core/sup->forms "x := 1")))
+    (is (thrown? #?(:clj Exception :cljs js/Error)
+                 (core/sup->forms "defn g []:\n  let x := 1\n  x\nend"))))
+  (testing "destructuring and type-hinted names bind too"
+    (is (= '[(defn f [p] (let [[a b] p {:keys [c]} m n 3] (+ a b c n)))]
+           (core/sup->forms "defn f [p]:\n  [a b] := p\n  {:keys [c]} := m\n  ^long n := 3\n  a + b + c + n\nend")))))
+
+(deftest test-let-flattening
+  (testing "a let in tail position of a body prints as := statements"
+    (is (= "defn f [x]:\n  y := g(x)\n  z := y + 1\n  h(z)\nend"
+           (core/forms->sup '[(defn f [x] (let [y (g x) z (+ y 1)] (h z)))])))
+    (is (= "defn f []:\n  if c:\n    x := 1\n    g(x)\n  else:\n    2\n  end\nend"
+           (core/forms->sup '[(defn f [] (if c (let [x 1] (g x)) 2))]))))
+  (testing "a let whose body is a single let keeps the inner one as a block"
+    (is (= "defn f []:\n  a := 1\n  let [b 2]:\n    a + b\n  end\nend"
+           (core/forms->sup '[(defn f [] (let [a 1] (let [b 2] (+ a b))))]))))
+  (testing "lets that are values, statements before others, or top-level stay blocks"
+    (is (str/includes? (core/forms->sup '[(def cfg (let [a 1] {:a a}))]) "let [a 1]:"))
+    (is (str/includes? (core/forms->sup '[(defn f [] (do (let [x 1] (log x)) (g x)))]) "let [x 1]:"))
+    (is (str/starts-with? (core/forms->sup '[(let [c (atom {})] (defn f [] @c))]) "let [c atom({})]:")))
+  (testing "all of them read back exactly"
+    (is (roundtrips? '[(defn f [x] (let [y (g x) z (+ y 1)] (h z)))
+                       (defn f [] (if c (let [x 1] (g x)) (let [y 2] (h y))))
+                       (defn f [] (let [a 1] (let [b 2] (+ a b))))
+                       (defn f [] (let [a 1] (g a) (let [b 2] (+ a b))))
+                       (defn f [p] (let [[a b] p {:keys [c]} m ^long n 3] (+ a b c n)))
+                       (defn f [] (loop [i 0] (let [j (inc i)] (recur j))))
+                       (defn f [] (let [x (if c 1 2)] x))
+                       (defn f [] (let [] 1))])))
+  (testing "block words as names or values keep the let block"
+    (is (str/includes? (core/forms->sup '[(defn f [] (let [end (now)] end))]) "let [end now()]:"))
+    (is (str/includes? (core/forms->sup '[(defn f [case] (let [{:keys [a]} case] a))]) "let [{:keys [a]} case]:"))
+    (is (roundtrips? '[(defn f [] (let [end (now) start (now)] (- end start)))
+                       (defn f [case] (let [{:keys [a]} case] a))
+                       (defn f [] (let [match 1] match))])))
+  (testing "a block followed by a vector statement"
+    (is (roundtrips? '[(defn f [] (let [sink (proxy [A] [] (size [] 1))] [sink 1]))
+                       (proxy [A] [] (end [] 1))])))
+  (testing "comments above bindings survive"
+    (let [src "defn g []:\n  ;; before\n  x := 1\n  ;; inside\n  h(x)\nend"]
+      (is (= src (core/pprint-sup (core/sup->forms src)))))))
 
 (deftest test-shape-options
   (testing "options come with the shape from the same source"

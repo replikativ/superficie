@@ -177,6 +177,18 @@ let [x 1 y 2]:
   x + y
 end
 
+;; a let that ends a body reads as statements: x := v binds x for the rest of it
+defn step [state dt]:
+  v := velocity(state)
+  [x y] := position(state)
+  assoc(state, :x, x + v * dt, :y, y)
+end
+```
+
+`x := v` binds only as a body statement, with `:=` on the same line as the name; consecutive statements are one `let`. A `let` used as a value (`def cfg: let [a 1]: … end`) stays a block, and elsewhere `:=` is the keyword.
+
+```
+
 for [x xs y ys :when x not= y]:
   [x y]
 end
@@ -296,14 +308,14 @@ This round-trips correctly with Clojure. The `clj->sup` converter preserves synt
 ;; Superficie
 defmacro -> [x & forms]:
   loop [x x, forms forms]:
-    if forms :
-      let [form first(forms), threaded if seq?(form):
-        `~first(form)(~x, ~@next(form))
-      else:
-        list(form, x)
-      end]:
-        recur(threaded next(forms))
-      end
+    if forms:
+      form := first(forms)
+      threaded := if seq?(form):
+                    `(~first(form))(~x, ~@next(form))
+                  else:
+                    list(form, x)
+                  end
+      recur(threaded, next(forms))
     else:
       x
     end

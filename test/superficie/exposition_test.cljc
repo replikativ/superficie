@@ -63,13 +63,14 @@
     (is (roundtrips? forms))))
 
 (deftest test-long-let-one-binding-per-line
-  (let [forms '[(defn f [x]
+  ;; a let used as a value keeps its block (in tail position it prints as :=)
+  (let [forms '[(def v
                   (let [aaaaaaaaaa (compute-something x)
                         bbbbbbbbbb (compute-something-else aaaaaaaaaa)
                         cccccccccc (combine aaaaaaaaaa bbbbbbbbbb)]
                     cccccccccc))]
         out (core/pprint-sup forms)]
-    (is (str/includes? out "  let [aaaaaaaaaa compute-something(x),\n       bbbbbbbbbb "))
+    (is (str/includes? out "let [aaaaaaaaaa compute-something(x),\n            bbbbbbbbbb "))
     (is (roundtrips? forms))))
 
 (deftest test-dotted-calls-inside-ansatz-forms
@@ -123,17 +124,26 @@
                 (defn model [a0 a1]
                   (spin (let [alpha (sample (uniform a0 a1) :id :alpha)] alpha)))]
         out (core/pprint-sup forms)]
-    (is (str/includes? out "  spin:\n    let [alpha sample(uniform(a0, a1), :id, :alpha)]:"))
+    (is (str/includes? out "  spin:\n    alpha := sample(uniform(a0, a1), :id, :alpha)\n    alpha\n  end"))
     (is (roundtrips? forms))))
 
 (deftest test-block-binding-value-layout
-  (let [forms '[(defn f [y]
-                  (let [a 1
-                        yhat (if (contains? y :turnover) (:turnover y) y)]
-                    yhat))]
-        out (core/pprint-sup forms)]
-    (is (str/includes? out "       yhat if contains?(y, :turnover):\n              :turnover(y)\n            else:\n              y\n            end]:"))
-    (is (roundtrips? forms))))
+  (testing "in a let block, a block value is indented at the value"
+    (let [forms '[(defn f [y]
+                    (g (let [a 1
+                             yhat (if (contains? y :turnover) (:turnover y) y)]
+                         yhat)))]
+          out (core/pprint-sup forms)]
+      (is (str/includes? out "         yhat if contains?(y, :turnover):\n                :turnover(y)\n              else:\n                y\n              end]:"))
+      (is (roundtrips? forms))))
+  (testing "and after :="
+    (let [forms '[(defn f [y]
+                    (let [a 1
+                          yhat (if (contains? y :turnover) (:turnover y) y)]
+                      yhat))]
+          out (core/pprint-sup forms)]
+      (is (str/includes? out "  yhat := if contains?(y, :turnover):\n            :turnover(y)\n          else:\n            y\n          end\n  yhat\n"))
+      (is (roundtrips? forms)))))
 
 (deftest test-numeric-equality-infix
   (is (= "a == b" (core/forms->sup ['(== a b)])))
