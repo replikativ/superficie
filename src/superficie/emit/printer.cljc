@@ -231,7 +231,10 @@
       (str "(" (print-form arg) ")")
       (print-form arg))))
 
-(defn- print-infix [entry op-str args & [head]]
+(defn- infix-operand-strs
+  "The printed operands of an infix expression, each parenthesized exactly as
+   the reader needs to rebuild the same form."
+  [entry args head]
   (let [prec       (:prec entry 0)
         left-assoc? (not= :right (:assoc entry))
         ;; Right operands of left-associative ops need parens at equal precedence
@@ -240,14 +243,16 @@
         ;; comparisons chain (a < b < c reads as (and (< a b) (< b c))), so an
         ;; operand at comparison level needs parens on either side
         left-threshold (if (:comparison entry) (inc prec) prec)]
-    (str/join (str " " op-str " ")
-              (cons (let [a (first args)]
-                      ;; (* (* a b) c): the reader flattens a * b * c into (* a b c),
-                      ;; so a nested left operand of the same variadic op is grouped
-                      (if (and (:variadic entry) head (seq? a) (= head (first a)))
-                        (str "(" (print-form a) ")")
-                        (infix-print-arg left-threshold a)))
-                    (map #(infix-print-arg right-threshold %) (rest args))))))
+    (cons (let [a (first args)]
+            ;; (* (* a b) c): the reader flattens a * b * c into (* a b c),
+            ;; so a nested left operand of the same variadic op is grouped
+            (if (and (:variadic entry) head (seq? a) (= head (first a)))
+              (str "(" (print-form a) ")")
+              (infix-print-arg left-threshold a)))
+          (map #(infix-print-arg right-threshold %) (rest args)))))
+
+(defn- print-infix [entry op-str args & [head]]
+  (str/join (str " " op-str " ") (infix-operand-strs entry args head)))
 
 (def ^:dynamic *body-form-printer*
   "When bound (by the pretty-printer) to (fn [form col] text), prints each
@@ -320,7 +325,9 @@
       ;; single arity with vector params
       (and (seq rest2) (vector? (first rest2)))
       (let [[params & body] rest2]
-        (if (= 1 (count body))
+        (if (and (= 1 (count body))
+                 ;; only a body that stays on one line reads well inline
+                 (not (str/includes? (print-form (first body)) "\n")))
           ;; single-expression body: inline, delimited by `end` so it stays
           ;; unambiguous on one line (no indentation-sensitivity needed).
           (str prefix " " (print-form params) ": " (print-form (first body)) " end")
@@ -381,7 +388,10 @@
                                   s (sep k v)
                                   vcol (+ start (count ks) (count s))]
                               (str ks s (binding [*indent* (apply str (repeat vcol " "))]
-                                          (print-form v)))))
+                                          ;; width-aware under the pretty-printer
+                                          (if *body-form-printer*
+                                            (*body-form-printer* v vcol)
+                                            (print-form v))))))
                           kvs)]
            (str "[" (str/join (str ",\n" (apply str (repeat start " "))) pairs) "]"))
          flat))
@@ -716,6 +726,22 @@
        (let [e (infix-entry (first form))
              n (count (rest form))]
          (boolean (and e (if (:variadic e) (>= n 2) (= n 2)))))))
+
+(defn infix-parts
+  "For a form that prints as infix: [operator-string operand-strings], with the
+   operands parenthesized as print-form would. The pretty-printer uses it to
+   break a long expression before its operators; the reader continues an infix
+   expression across a line break."
+  [form]
+  (when (infix-form? form)
+    (let [head (first form)
+          e (infix-entry head)]
+      [(or (:str e) (name head)) (vec (infix-operand-strs e (rest form) head))])))
+
+(defn infix-prec
+  "Precedence of a form that prints as infix, else nil."
+  [form]
+  (when (infix-form? form) (:prec (infix-entry (first form)))))
 
 (defn quoted-as-sexp?
   "Must the target of a quote print as an S-expression? ' binds one form, so

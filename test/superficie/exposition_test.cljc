@@ -138,3 +138,27 @@
 (deftest test-numeric-equality-infix
   (is (= "a == b" (core/forms->sup ['(== a b)])))
   (is (roundtrips? '[(== a 0.0) (== a b c) (f ==) (== (== a b) true)])))
+
+(deftest test-long-infix-breaks-before-operators
+  (let [form '(- (+ (aget U (+ (* ym W) x)) (aget U (+ (* yp W) x))
+                    (aget U (+ (* y W) xm)) (aget U (+ (* y W) xp)))
+                 (* c u))
+        out (core/pprint-sup [form] {:width 50})]
+    (testing "a same-precedence chain breaks before its operators, aligned"
+      (is (str/includes? out "\n+ aget(U, y * W + xm)"))
+      (is (str/includes? out "\n- c * u")))
+    (is (= [form] (core/sup->forms out)))))
+
+(deftest test-snippet-context
+  (let [snip "(deftm weight [att :- Double, d :- Double] :- Double (* att d))"]
+    (testing "a fragment without its ns form renders library macros as calls"
+      (is (str/starts-with? (core/clj->sup snip) "deftm(")))
+    (testing "the context supplies the requires the fragment assumes"
+      (is (= "deftm weight [att :- Double d :- Double] :- Double:\n  att * d\nend"
+             (core/clj->sup snip {:context "(require '[raster.core :refer [deftm]])"}))))))
+
+(deftest test-snippet-context-reads-back
+  (let [ctx "(require '[raster.core :refer [deftm]])"
+        snip "(deftm weight [att :- Double] :- Double (* att att))"
+        out (core/clj->sup snip {:context ctx})]
+    (is (= (core/clj->forms snip) (core/sup->forms out {:context ctx})))))
