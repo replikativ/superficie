@@ -3,7 +3,8 @@
    All resolution is native — no delegation to read-string."
   (:require [clojure.string :as str]
             [superficie.errors :as errors]
-            [superficie.forms :as forms]))
+            [superficie.forms :as forms]
+            #?(:clj [clojure.instant])))
 
 ;; ---------------------------------------------------------------------------
 ;; String
@@ -239,9 +240,22 @@
 ;; ---------------------------------------------------------------------------
 
 (defn resolve-tagged-literal
-  "Resolve a tagged literal. JVM: produces TaggedLiteral. CLJS: not supported."
+  "Resolve a tagged literal. The built-in tags read to their values, as
+   Clojure's reader does: #uuid → a UUID, #inst → an instant (java.util.Date
+   on the JVM, js/Date in ClojureScript). Other tags: a TaggedLiteral on the
+   JVM; not supported in ClojureScript."
   [tag data loc]
-  #?(:clj  (tagged-literal tag data)
-     :cljs (errors/reader-error
-            (str "Tagged literals (#" tag ") are not supported in the ClojureScript reader")
-            loc)))
+  (cond
+    (and (= 'uuid tag) (string? data))
+    (or (parse-uuid data)
+        (errors/reader-error (str "Invalid #uuid literal: " (pr-str data)) loc))
+
+    (and (= 'inst tag) (string? data))
+    #?(:clj  (clojure.instant/read-instant-date data)
+       :cljs (js/Date. data))
+
+    :else
+    #?(:clj  (tagged-literal tag data)
+       :cljs (errors/reader-error
+              (str "Tagged literals (#" tag ") are not supported in the ClojureScript reader")
+              loc))))

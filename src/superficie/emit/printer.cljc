@@ -231,14 +231,22 @@
       (str "(" (print-form arg) ")")
       (print-form arg))))
 
-(defn- print-infix [entry op-str args]
+(defn- print-infix [entry op-str args & [head]]
   (let [prec       (:prec entry 0)
         left-assoc? (not= :right (:assoc entry))
         ;; Right operands of left-associative ops need parens at equal precedence
         ;; to preserve left-to-right evaluation order.
-        right-threshold (if left-assoc? (inc prec) prec)]
+        right-threshold (if left-assoc? (inc prec) prec)
+        ;; comparisons chain (a < b < c reads as (and (< a b) (< b c))), so an
+        ;; operand at comparison level needs parens on either side
+        left-threshold (if (:comparison entry) (inc prec) prec)]
     (str/join (str " " op-str " ")
-              (cons (infix-print-arg prec (first args))
+              (cons (let [a (first args)]
+                      ;; (* (* a b) c): the reader flattens a * b * c into (* a b c),
+                      ;; so a nested left operand of the same variadic op is grouped
+                      (if (and (:variadic entry) head (seq? a) (= head (first a)))
+                        (str "(" (print-form a) ")")
+                        (infix-print-arg left-threshold a)))
                     (map #(infix-print-arg right-threshold %) (rest args))))))
 
 (def ^:dynamic *body-form-printer*
@@ -277,9 +285,21 @@
       (and (seq rest3) (vector? (first rest3))
            (not (and (symbol? name-sym) (= "=>" (clojure.core/name name-sym)))))
       (let [[params & body] rest3
-            doc-part (if docstring (str " " (print-docstring docstring)) "")
-            attr-part (if attr-map (str " " (print-form attr-map)) "")]
-        (str head-str " " (print-form name-sym) doc-part attr-part " " (print-form params) ":\n"
+            multi-doc? (and docstring
+                            (or (str/includes? docstring "\n")
+                                (and *width*
+                                     (> (+ (count *indent*) (count head-str) (count (print-form name-sym))
+                                           (count (print-docstring docstring)) (count (print-form params)) 4)
+                                        *width*))))
+            cont (str "\n" *indent* "    ")
+            ;; a multi-line docstring and the rest of the header go on hanging-indented
+            ;; continuation lines (the reader reads a defn header across lines)
+            doc-part (cond multi-doc? (str cont (print-docstring docstring))
+                           docstring (str " " (print-docstring docstring))
+                           :else "")
+            attr-part (if attr-map (str " " (print-form attr-map)) "")
+            params-sep (if multi-doc? cont " ")]
+        (str head-str " " (print-form name-sym) doc-part attr-part params-sep (print-form params) ":\n"
              (print-body (vec body)) "\n"
              *indent* "end"))
       ;; params is not a vector — fall back to call syntax (e.g. fn used as local variable)
@@ -743,15 +763,28 @@
         head-str (str head)
         ;; print header items left to right, tracking the column so a long
         ;; parameter vector can break inside its brackets
-        header-strs (loop [items header col (+ (count *indent*) (count head-str) 1) out []]
-                      (if-let [x (first items)]
-                        (let [s (if (vector? x) (print-header-vector x col) (print-header-item x))
-                              last-line (peek (str/split s #"\n" -1))
-                              col' (if (str/includes? s "\n")
-                                     (+ (count last-line) 1)
-                                     (+ col (count s) 1))]
-                          (recur (rest items) col' (conj out s)))
-                        out))
+        print-items (fn [items col]
+                      (loop [items items col col out []]
+                        (if-let [x (first items)]
+                          (let [s (if (vector? x) (print-header-vector x col) (print-header-item x))
+                                last-line (peek (str/split s #"\n" -1))
+                                col' (if (str/includes? s "\n")
+                                       (+ (count last-line) 1)
+                                       (+ col (count s) 1))]
+                            (recur (rest items) col' (conj out s)))
+                          out)))
+        header-strs (print-items header (+ (count *indent*) (count head-str) 1))
+        ;; a multi-line docstring goes on its own continuation line, with the rest
+        ;; of the header on the next one — Python's hanging indent, deeper than the body
+        flat-len (+ (count *indent*) (count head-str) 1
+                    (count (str/join " " header-strs)))
+        doc-idx (first (keep-indexed (fn [i x]
+                                       (when (and (string? x)
+                                                  (or (str/includes? x "\n")
+                                                      (and *width* (> flat-len *width*))))
+                                         i))
+                                     header))
+        cont-indent (str *indent* "    ")
         call (fn [] (binding [*dotted-calls* outer-dotted]
                       (str head-str "(" (print-args args) ")")))]
     (if (or (nil? split)
@@ -765,8 +798,18 @@
             (some #(contains? block-terminator-syms %) (concat header body))
             (some #{(keyword "=")} header))
       (call)
-      (let [line (if (seq header)
+      (let [line (cond
+                   doc-idx
+                   (let [before (subvec (vec header-strs) 0 doc-idx)
+                         doc (nth header-strs doc-idx)
+                         after (print-items (subvec (vec header) (inc doc-idx)) (count cont-indent))]
+                     (str head-str (when (seq before) (str " " (str/join " " before)))
+                          "\n" cont-indent (if (seq after) doc (colon-sep doc))
+                          (when (seq after)
+                            (str "\n" cont-indent (colon-sep (str/join " " after))))))
+                   (seq header)
                    (str head-str " " (colon-sep (str/join " " header-strs)))
+                   :else
                    (str head-str ":"))]
         (if (seq body)
           (str line "\n" (print-body (vec body)) "\n" *indent* "end")
@@ -965,7 +1008,7 @@
                (and e (if (:variadic e) (>= n 2) (= n 2)))))
         (let [e      (infix-entry head)
               op-str (or (:str e) (name head))]
-          (print-infix e op-str (rest form)))
+          (print-infix e op-str (rest form) head))
 
         ;; call: sup emits head(args...), clj emits (head args...)
         :else
