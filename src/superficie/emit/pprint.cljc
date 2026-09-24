@@ -347,37 +347,76 @@
 
 (defn- infix-chain
   "The operands and operators of an infix expression as one chain of
-   [operator operand] pieces (the first operator is nil). A left operand at the
-   same precedence printed without parens — (+ a b) under - in a + b - c — is
-   part of the same visual chain and is expanded into it."
+   [operator operand-string operand-form] pieces (the first operator is nil).
+   A left operand at the same precedence printed without parens — (+ a b)
+   under - in a + b - c — is part of the same visual chain and is expanded."
   [form]
   (let [[op strs] (printer/infix-parts form)
-        a0 (second form)
+        args (vec (rest form))
+        a0 (first args)
         s0 (first strs)
         head (if (and (= (printer/infix-prec a0) (printer/infix-prec form))
                       (not (str/starts-with? s0 "(")))
                (infix-chain a0)
-               [[nil s0]])]
-    (into head (map (fn [s] [op s]) (rest strs)))))
+               [[nil s0 a0]])]
+    (into head (map (fn [s a] [op s a]) (rest strs) (rest args)))))
+
+(defn- end-col
+  "Column after text placed at start-col: text's first line starts at start-col,
+   later lines carry their own indentation."
+  [text start-col]
+  (if (str/includes? text "\n")
+    (count (peek (str/split text #"\n" -1)))
+    (+ start-col (count text))))
 
 (defn- pp-infix
   "Pretty-print an infix expression that does not fit: break before operators,
-   operands aligned at the first one's column (col). nil when an operand spans
-   lines, so the caller falls back."
+   operands aligned at the first one's column (col). An operand printed without
+   parens that is too long for its line is itself pretty-printed there (a long
+   call breaks its arguments). nil when an operand spans lines, so the caller
+   falls back."
   [form col width]
   (when (printer/infix-parts form)
     (let [chain (infix-chain form)]
-      (when (not-any? (fn [[_ x]] (str/includes? x "\n")) chain)
-        (let [indent (indent-str col)]
-          (loop [[[op x] & more] (rest chain)
-                 line (second (first chain))
-                 lines []]
-            (if-not x
-              (str/join (str "\n" indent) (conj lines line))
-              (let [piece (str op " " x)]
-                (if (> (+ col (count line) 1 (count piece)) width)
-                  (recur more piece (conj lines line))
-                  (recur more (str line " " piece) lines))))))))))
+      (when (not-any? (fn [[_ x _]] (str/includes? x "\n")) chain)
+        (let [indent (indent-str col)
+              ;; an operand at column c: flat when it fits, else pretty-printed
+              ;; if it needs no parens (its flat text is its own print-form)
+              render (fn [x a c]
+                       (if (or (<= (+ c (count x)) width)
+                               (not= x (flat a)))
+                         x
+                         (pp a c width)))
+              [_ x0 a0] (first chain)
+              s0 (render x0 a0 col)]
+          (loop [[[op x a] & more] (rest chain)
+                 out s0
+                 cur (end-col s0 col)]
+            (if-not op
+              out
+              (let [piece (str op " " x)
+                    here (+ cur 1 (count op) 1)
+                    ;; the operand pretty-printed in place, if its first line fits
+                    inline (when (and (= x (flat a)) (> (+ here (count x)) width))
+                             (let [r (pp a here width)
+                                   first-line (first (str/split r #"\n"))]
+                               (when (and (str/includes? r "\n")
+                                          (<= (+ here (count first-line)) width))
+                                 r)))]
+                (cond
+                  (<= (+ cur 1 (count piece)) width)
+                  (recur more (str out " " piece) (+ cur 1 (count piece)))
+
+                  inline
+                  (recur more (str out " " op " " inline) (end-col inline here))
+
+                  :else
+                  ;; start a continuation line: operator, then the operand
+                  (let [c (+ col (count op) 1)
+                        r (render x a c)]
+                    (recur more
+                           (str out "\n" indent op " " r)
+                           (end-col r c))))))))))))
 
 (defn- pp-call-smart
   "Pretty-print a call, keeping leading args with the head when appropriate.
