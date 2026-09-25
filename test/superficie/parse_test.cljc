@@ -252,8 +252,8 @@
 ;; ---------------------------------------------------------------------------
 
 (deftest test-defrecord
-  (is (= '(defrecord Point [x y] Drawable (draw [this] "pt") (area [this] 0.0))
-         (parse1 "defrecord Point [x y]:\n  Drawable\n  draw [this]:\n    \"pt\"\n  end\n  area [this]:\n    0.0\n  end\nend")))
+  (is (= '(defrecord Point [x y] Drawable (draw [this] "pt") (area [this] 1.5))
+         (parse1 "defrecord Point [x y]:\n  Drawable\n  draw [this]:\n    \"pt\"\n  end\n  area [this]:\n    1.5\n  end\nend")))
   (testing "no interfaces"
     (is (= '(defrecord Empty [])
            (parse1 "defrecord Empty []:\nend")))))
