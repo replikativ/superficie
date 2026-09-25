@@ -633,7 +633,7 @@ The [playground](https://replikativ.github.io/superficie/examples/playground.htm
 
 #### highlight.js (web)
 
-A highlight.js plugin is provided at `dist/superficie.hljs.js`:
+A highlight.js plugin ships in the npm package as `dist/superficie.hljs.js` (source: [`editors/highlightjs/`](editors/highlightjs/)):
 
 ```html
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>

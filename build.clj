@@ -106,15 +106,23 @@
     (spit "package.json" updated)
     (println (str "package.json version set to " version))))
 
-(defn npm-publish
-  "Bump version, build all JS targets, then publish to npm.
-   Requires npx and npm on PATH."
+(defn npm-build
+  "Bump version and build every file the npm package ships: the JS targets,
+   and the highlight.js grammar copied from editors/highlightjs/.
+   Requires npx on PATH."
   [_]
   (npm-version nil)
   (println "Building JS targets...")
   (let [ret (b/process {:command-args ["npx" "shadow-cljs" "release" "npm" "browser" "browser-repl"]})]
     (when (not= 0 (:exit ret))
       (throw (ex-info "shadow-cljs build failed" {:exit (:exit ret)}))))
+  (b/copy-file {:src "editors/highlightjs/superficie.hljs.js"
+                :target "dist/superficie.hljs.js"}))
+
+(defn npm-publish
+  "Build (npm-build), then publish to npm. Requires npx and npm on PATH."
+  [_]
+  (npm-build nil)
   (println "Publishing to npm...")
   (let [ret (b/process {:command-args ["npm" "publish"]})]
     (when (not= 0 (:exit ret))
