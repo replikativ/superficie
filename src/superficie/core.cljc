@@ -14,6 +14,8 @@
             [superficie.forms :as forms]
             [superficie.parse.expander :as expander]
             [superficie.pipeline :as pipeline]
+            #?(:cljs [superficie.parse.resolve :as resolve])
+            #?(:cljs [clojure.string :as str])
             #?(:clj  [clojure.tools.reader :as tr])
             #?(:clj  [clojure.tools.reader.reader-types :as tr-types])
             #?(:cljs [cljs.tools.reader :as cljs-reader])
@@ -94,6 +96,78 @@
 
        :else form)))
 
+#?(:cljs
+   (defn- tag-js-numbers
+     "Clojure source with each number literal that JS would not print back as
+      written (4.0, 1e3, 0xFF, 1/2, 2N, 1.5M, 2r101) wrapped as
+      #superficie/num \"4.0\": the reader has no hook for a number's text, and
+      JS reads 4.0 as 4. Character literals likewise become #superficie/char.
+      Strings, comments and regexes are copied."
+     [src]
+     (let [n (count src)
+           terminator? #(or (re-find #"[\s,;\"@^`~()\[\]{}\\]" %) false)
+           sb (js/Array.)]
+       (loop [i 0]
+         (if (>= i n)
+           (.join sb "")
+           (let [c (.charAt src i)]
+             (cond
+               ;; string or regex: copy through the closing quote
+               (or (= c "\"") (and (= c "#") (= "\"" (.charAt src (inc i)))))
+               (let [start i
+                     i (if (= c "#") (+ i 2) (inc i))
+                     end (loop [j i]
+                           (cond (>= j n) n
+                                 (= "\\" (.charAt src j)) (recur (+ j 2))
+                                 (= "\"" (.charAt src j)) (inc j)
+                                 :else (recur (inc j))))]
+                 (.push sb (subs src start end))
+                 (recur end))
+
+               ;; comment: copy to the end of the line
+               (= c ";")
+               (let [end (or (str/index-of src "\n" i) n)]
+                 (.push sb (subs src i end))
+                 (recur end))
+
+               ;; character literal (\a, \newline, \( ...) — JS reads \a as the
+               ;; string "a", so it is tagged to print as written
+               (= c "\\")
+               (let [end (min n (loop [j (+ i 2)]
+                                  (if (and (< j n) (re-find #"[A-Za-z0-9]" (.charAt src j)))
+                                    (recur (inc j))
+                                    j)))]
+                 (.push sb (str "#superficie/char " (pr-str (subs src i end))))
+                 (recur end))
+
+               ;; a token: read to its terminator; a numeric one may need a tag
+               (not (terminator? c))
+               (let [end (loop [j i]
+                           (if (and (< j n) (not (terminator? (.charAt src j))))
+                             (recur (inc j))
+                             j))
+                     tok (subs src i end)]
+                 (.push sb (if (and (re-find #"^[+-]?\d" tok)
+                                    ;; 017 is octal; a long integer loses digits
+                                    (not= (str (js/parseInt tok 10)) (str/replace tok #"^\+" ""))
+                                    (not= (str (js/parseFloat tok)) tok))
+                             (str "#superficie/num \"" tok "\"")
+                             tok))
+                 (recur end))
+
+               :else
+               (do (.push sb c)
+                   (recur (inc i))))))))))
+
+#?(:cljs
+   (defn- read-tagged-char [raw]
+     (resolve/resolve-char raw {})))
+
+#?(:cljs
+   (defn- read-tagged-number [raw]
+     (let [v (resolve/resolve-number raw {})]
+       (if (forms/raw? v) v (forms/->SupRaw v raw)))))
+
 (defn clj->forms
   "Read a Clojure source string, return a vector of forms.
    On JVM: uses clojure.tools.reader with syntax-quote preserved as AST nodes
@@ -134,7 +208,7 @@
      ;;   x = primitive   → literal value
      ;;   x = (cljs.core/sequence …) or (cljs.core/vec …) → literal nested form
      ;;   x = anything else → was ~x (SupUnquote)
-     (let [rdr (indexing-push-back-reader clj-src)]
+     (let [rdr (indexing-push-back-reader (tag-js-numbers clj-src))]
        (letfn [(sq-list? [f]
                  (and (seq? f)
                       (= 'cljs.core/sequence (first f))
@@ -154,8 +228,9 @@
                    ;; (quote sym) — literal symbol preserved as-is
                    (and (seq? x) (= 'quote (first x)))
                    (second x)
-                   ;; primitives — literal value
-                   (or (keyword? x) (number? x) (string? x) (nil? x) (boolean? x))
+                   ;; primitives — literal value (a number literal kept as written too)
+                   (or (keyword? x) (number? x) (string? x) (nil? x) (boolean? x)
+                       (forms/raw? x))
                    x
                    ;; nested list expansion — reconstruct the plain list
                    (sq-list? x)
@@ -180,6 +255,19 @@
                ;; Top-level reverse: detect SQ expansion or recurse.
                (denorm [form]
                  (cond
+                   ;; a number literal kept as written (#superficie/num) — a record,
+                   ;; not a map to rebuild
+                   (forms/raw? form) form
+                   ;; inside a preserved #?(...) the tag is not read: read it here
+                   (and (tagged-literal? form) (= 'superficie/num (:tag form)))
+                   (read-tagged-number (:form form))
+                   (and (tagged-literal? form) (= 'superficie/char (:tag form)))
+                   (read-tagged-char (:form form))
+                   ;; a reader conditional is a record too: keep its type
+                   (forms/sup-reader-conditional? form)
+                   (forms/make-reader-conditional (denorm (forms/rc-form form))
+                                                  (forms/rc-splicing? form))
+
                    (sq-vec? form)
                    (forms/->SupSyntaxQuote
                     (with-meta (vec (map sq-concat-elem (concat-args (second form))))
@@ -199,6 +287,8 @@
                      (meta form))
                    :else form))]
          (binding [cljs-reader/resolve-symbol (fn [s] s)
+                   cljs-reader/*data-readers* {'superficie/num read-tagged-number
+                                               'superficie/char read-tagged-char}
                    cljs-reader/*default-data-reader-fn* tagged-literal]
            (loop [forms []]
              (let [form (cljs-reader/read

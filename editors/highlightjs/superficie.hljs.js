@@ -43,6 +43,19 @@
       'for doseq dotimes do try catch finally while ' +
       'end else new not throw recur and or mod rem in';
 
+    // A Clojure symbol may contain - / ! ? * . etc., so \b is not a symbol
+    // boundary: without these, `map` would match inside par/map-void! and
+    // `zero` inside add-zero.
+    var SYM_CHAR = "[A-Za-z0-9_\\-!?*+<>=&'/.$%#]";
+    var SYM_BEFORE = '(?<!' + SYM_CHAR + '|:)';
+    var SYM_AFTER = "(?![A-Za-z0-9_\\-!?*+<>=&'/.$%#])";
+
+    function wordsPattern(words) {
+      return words.split(' ').map(function (w) {
+        return w.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
+      }).join('|');
+    }
+
     // --- Atoms ---
 
     var NUMBER = {
@@ -120,16 +133,17 @@
       relevance: 0
     };
 
-    // --- Definition forms: defn name, def name, defrecord Name, etc. ---
+    // --- Definition forms: defn name, a/defn name, deftm name, etc. ---
+    // Only the defined name is a title; parameters and types stay plain.
     var DEFINITION = {
-      begin: /\b(defmacro|defn-?|defonce|def|defmulti|defmethod|defprotocol|defrecord|deftype|reify|proxy)\s+/,
-      beginScope: 'keyword',
-      end: /(?=\(|:=|\s*$)/,
-      contains: [{
-        scope: 'title.function',
-        match: /[a-zA-Z_\-!.?+*=<>&'][a-zA-Z0-9_\-!.?+*=<>&'/;:$#]*/,
-        relevance: 0
-      }]
+      match: [
+        new RegExp(SYM_BEFORE + '(?:[A-Za-z0-9_.\\-]+\\/)?(?:defmacro|defn-?|defonce|def|defmulti|defmethod|' +
+                   'defprotocol|defrecord|deftype|deftm|deftheorem|theorem|inductive)' + SYM_AFTER),
+        /\s+/,
+        new RegExp("[A-Za-z_\\-!?*+<>=&'][A-Za-z0-9_\\-!?*+<>=&'/.$%#]*")
+      ],
+      scope: { 1: 'keyword', 3: 'title.function' },
+      relevance: 0
     };
 
     // --- ns form ---
@@ -145,30 +159,38 @@
     };
 
     // --- Build keyword pattern for block keywords ---
-    var KW_PATTERN = BLOCK_KEYWORDS.replace(/[- ]/g, function (c) {
-      return c === ' ' ? '|' : '\\-';
-    });
+    var KW_PATTERN = wordsPattern(BLOCK_KEYWORDS);
 
     var KEYWORD = {
-      match: new RegExp('\\b(' + KW_PATTERN + ')\\b'),
+      match: new RegExp(SYM_BEFORE + '(' + KW_PATTERN + ')' + SYM_AFTER),
+      scope: 'keyword',
+      relevance: 0
+    };
+
+    // --- Any block head: the first word of a line that ends in ':' opens a
+    // block, so library macros (par/map-void!, spin, a/theorem) highlight
+    // without being listed. Not `x := …`, where x is a name, and not a line
+    // that continues a bracket from the line above (`k :- Double] :- Void:`),
+    // which closes a bracket before it opens one.
+    var BLOCK_HEAD = {
+      match: new RegExp("(?<=^[ \\t]*)[A-Za-z_*!?<>=&][A-Za-z0-9_\\-!?*+<>=&'/.$%#]*" +
+                        '(?![^\\n]*:=)(?![^\\n\\[]*\\])(?![^\\n(]*\\))(?=[^\\n]*:[ \\t]*$)', 'm'),
       scope: 'keyword',
       relevance: 0
     };
 
     // --- Built-in function calls: map(...), filter(...), str(...) ---
-    var BUILTIN_PATTERN = CLOJURE_BUILTINS.replace(/[- ]/g, function (c) {
-      return c === ' ' ? '|' : '\\-';
-    });
+    var BUILTIN_PATTERN = wordsPattern(CLOJURE_BUILTINS);
 
     var BUILTIN_CALL = {
-      match: new RegExp('\\b(' + BUILTIN_PATTERN + ')(?=\\()'),
+      match: new RegExp(SYM_BEFORE + '(' + BUILTIN_PATTERN + ')(?=\\()'),
       scope: 'built_in',
       relevance: 0
     };
 
     // --- Built-in as value (not called): passed as argument, e.g. map(inc, xs) ---
     var BUILTIN_VALUE = {
-      match: new RegExp('\\b(' + BUILTIN_PATTERN + ')\\b'),
+      match: new RegExp(SYM_BEFORE + '(' + BUILTIN_PATTERN + ')' + SYM_AFTER),
       scope: 'built_in',
       relevance: 0
     };
@@ -176,7 +198,7 @@
     // --- Regular function calls: f(...) ---
     var FUNC_CALL = {
       match: new RegExp(
-        '(?!\\b(?:' + KW_PATTERN + '|' + BUILTIN_PATTERN + ')\\b)' +
+        SYM_BEFORE + '(?!(?:' + KW_PATTERN + '|' + BUILTIN_PATTERN + ')(?=\\())' +
         '[a-zA-Z_\\-!.?+*=<>&\'][a-zA-Z0-9_\\-!.?+*=<>&\'/;:$#]*(?=\\()'),
       scope: 'title.function',
       relevance: 0
@@ -220,6 +242,7 @@
         CHARACTER,
         DEFINITION,
         NS_FORM,
+        BLOCK_HEAD,
         METADATA,
         VAR_REF,
         CONSTRUCTOR,

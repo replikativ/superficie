@@ -79,8 +79,18 @@
   {"newline"  \newline "space"     \space "tab"  \tab
    "backspace" \backspace "formfeed" \formfeed "return" \return})
 
+(declare resolve-char*)
+
 (defn resolve-char
-  "Resolve a character literal token (e.g. \\a, \\newline, \\u0041) to a char."
+  "Resolve a character literal token (e.g. \\a, \\newline, \\u0041) to a char.
+   JS has no character type (\\a is the string \"a\"), so there every character
+   stays a SupRaw that prints as written."
+  [raw loc]
+  (let [c (resolve-char* raw loc)]
+    #?(:clj c
+       :cljs (if (forms/raw? c) c (forms/->SupRaw c raw)))))
+
+(defn- resolve-char*
   [raw loc]
   (let [body (subs raw 1)]    ; strip leading backslash
     (cond
@@ -117,6 +127,28 @@
 ;; ---------------------------------------------------------------------------
 ;; Number
 ;; ---------------------------------------------------------------------------
+
+#?(:cljs
+   (defn js-number-literal
+     "A Clojure number literal that JS cannot represent as written — hex, radix,
+      octal, ratio, N/M suffix, or a float like 4.0 — as SupRaw of its JS value
+      (what ClojureScript's reader gives) and its text."
+     [raw]
+     (let [neg? (str/starts-with? raw "-")
+           unsigned (cond-> raw (re-find #"^[+-]" raw) (subs 1))
+           sign #(if neg? (- %) %)
+           v (cond
+               (re-find #"^0[xX]" unsigned) (sign (js/parseInt (subs unsigned 2) 16))
+               (re-matches #"\d{1,2}r[0-9a-zA-Z]+" unsigned)
+               (let [sep (str/index-of unsigned "r")]
+                 (sign (js/parseInt (subs unsigned (inc sep)) (js/parseInt (subs unsigned 0 sep) 10))))
+               (str/includes? unsigned "/")
+               (let [[n d] (str/split unsigned #"/")]
+                 (sign (/ (js/parseInt n 10) (js/parseInt d 10))))
+               (re-find #"[NM]$" unsigned) (sign (js/parseFloat (subs unsigned 0 (dec (count unsigned)))))
+               (re-matches #"0[0-7]+" unsigned) (sign (js/parseInt unsigned 8))
+               :else (js/parseFloat raw))]
+       (forms/->SupRaw v raw))))
 
 (defn resolve-number
   "Resolve a number token to a Clojure numeric value.
@@ -169,23 +201,17 @@
              (forms/->SupRaw (if neg? (- v) v) raw))]
 
           :cljs
-          [(str/ends-with? raw "N")
-           (errors/reader-error "BigInt literals (N suffix) are not supported in ClojureScript" loc)
-           (str/ends-with? raw "M")
-           (errors/reader-error "BigDecimal literals (M suffix) are not supported in ClojureScript" loc)
-           (str/includes? raw "/")
-           (errors/reader-error "Ratio literals are not supported in ClojureScript" loc)
-           (re-find #"^[+-]?0[xX]" raw)
-           (errors/reader-error "Hex literals are not supported in ClojureScript" loc)
-           (re-matches #"[+-]?\d{1,2}r[0-9a-zA-Z]+" raw)
-           (errors/reader-error "Radix literals are not supported in ClojureScript" loc)
-           (re-matches #"[+-]?0[0-7]+" raw)
-           (errors/reader-error "Octal literals are not supported in ClojureScript" loc)])
+          ;; JS has one number type: these read as their JS value, as
+          ;; ClojureScript's reader does, and keep their notation as SupRaw
+          [(re-find #"^[+-]?(0[xX]|\d{1,2}r|0[0-7])|[NM/]" raw)
+           (js-number-literal raw)])
 
-      ;; Float  1.5  1e-3  — wrap scientific notation in SupRaw to preserve it
+      ;; Float  1.5  1e-3  — wrap in SupRaw what would not print back as written:
+      ;; scientific notation, and on JS a float with an integral value (4.0 is 4)
       (or (str/includes? raw ".") (str/includes? raw "e") (str/includes? raw "E"))
       (let [v #?(:clj (Double/parseDouble raw) :cljs (js/parseFloat raw))]
-        (if (or (str/includes? raw "e") (str/includes? raw "E"))
+        (if (or (str/includes? raw "e") (str/includes? raw "E")
+                #?(:cljs (not= (str v) raw)))
           (forms/->SupRaw v raw)
           v))
 
