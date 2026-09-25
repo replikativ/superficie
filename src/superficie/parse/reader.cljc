@@ -52,11 +52,7 @@
     ;; true inside a block whose shape has :dotted-calls — A.b(x) is (A.b x)
     :dotted-calls   (volatile! false)
     ;; {:get f :set g} inside a block whose shape has :index (x[i] → (aget x i))
-    :index-sym      (volatile! nil)
-    ;; token position where the current body statement starts: `x := v` binds
-    ;; only there. :top-start is the same for a top-level form, where it may not.
-    :stmt-start     (volatile! -1)
-    :top-start      (volatile! -1)}))
+    :index-sym      (volatile! nil)}))
 
 (defn- peof? [{:keys [tokens pos]}]
   (>= @pos (count tokens)))
@@ -530,7 +526,7 @@
                            (error-data p loc)))
     (padvance! p)))
 
-(declare wrap-body-lets)
+(declare wrap-body-lets parse-let-stmt)
 
 (defn- parse-body
   "Parse a sequence of exprs until block-terminator? or EOF.
@@ -543,8 +539,7 @@
             (cond
               (or (nil? tok) (block-terminator? tok)) forms
               :else
-              (let [form (do (vreset! (:stmt-start p) @(:pos p))
-                             (parse-expr p))
+              (let [form (parse-let-stmt p (parse-expr p))
                     nxt (ppeek p)]
                 ;; `aget(U, i) <- v` would otherwise read as three statements
                 (when (and @(:index-sym p) (sym-value? nxt "<-")
@@ -1111,10 +1106,12 @@
       (errors/reader-error "Unclosed block — expected 'end'"
                            (error-data p (assoc (plast-loc p) :incomplete true)))
 
-      ;; 'end' followed by '[' is a method named 'end', not the block terminator.
-      ;; (e.g. proxy method: (end [] body) → printed as 'end []: body end')
+      ;; 'end' followed by '[' on its line is a method named 'end', not the
+      ;; block terminator (proxy method (end [] body) prints as 'end []: body end');
+      ;; a vector on the next line is the statement after the block
       (and (end-symbol? (ppeek p))
-           (not (tok-type? (ppeek p 1) :open-bracket)))
+           (not (and (tok-type? (ppeek p 1) :open-bracket)
+                     (not (str/includes? (or (:ws (ppeek p 1)) "") "\n")))))
       items
 
       :else
@@ -1803,35 +1800,34 @@
 ;; Surface syntax: let x := expr sugar
 ;; ---------------------------------------------------------------------------
 
-(defn- maybe-parse-let-stmt
-  "After parsing a symbol, check for ':=' — if found, parse as let-statement.
-   Returns a ::let-stmt vector sentinel, or the bare symbol if no ':='.
-   `x := v` binds only as a body statement: start is the position of the
-   statement's first token (x, or `let` in `let x := v`), and := must follow on
-   the same line. Anywhere else := is the keyword, as in [x := y].
-   Only fires for unqualified, non-operator symbols — quoted operator values like
-   '= and qualified symbols like clojure.core/= in map literals must not be treated
-   as let-binding variables."
-  [p start sym]
-  (when (and (= start @(:top-start p))
-             (bind-op? (ppeek p))
-             (not (str/includes? (or (:ws (ppeek p)) "") "\n")))
-    (errors/reader-error "':=' binds a name for the rest of a block body — at top level, use def"
-                         (error-data p (select-keys (ppeek p) [:line :col]))))
-  (if (and (= start @(:stmt-start p))
-           (bind-op? (ppeek p))
-           (not (str/includes? (or (:ws (ppeek p)) "") "\n"))
-           (not @(:sexp-mode p))
-           (symbol? sym)
-           (nil? (namespace sym))
-           (not (contains? @ops/*surface-index* (name sym)))
-           ;; `x:` ends a block header (colon fused into the symbol); a ':='
-           ;; after it starts the body, e.g. a `case op:` arm `:= => ...`
-           (not (str/ends-with? (name sym) ":")))
-    (do (padvance! p) ; consume :=
-        (let [val (parse-expr p)]
-          [let-stmt-tag sym val]))
-    sym))
+(defn- let-target?
+  "Can form be the left side of `x := v`: a plain name (with or without a type
+   hint) or a destructuring vector or map."
+  [form]
+  (or (and (symbol? form) (nil? (namespace form))
+           (not (contains? @ops/*surface-index* (name form)))
+           (not (str/ends-with? (name form) ":")))
+      (vector? form)
+      (and (map? form) (not (record? form)))))
+
+(defn- bind-follows?
+  "Is the next token ':=' on the same line as what came before?"
+  [p]
+  (and (bind-op? (ppeek p))
+       (not (str/includes? (or (:ws (ppeek p)) "") "\n"))))
+
+(defn- parse-let-stmt
+  "A body statement just read as form: when ':=' follows on the same line,
+   `form := value` — a ::let-stmt sentinel that wrap-body-lets turns into a let
+   over the rest of the body. Elsewhere := is the keyword, as in [x := y]."
+  [p form]
+  (when (and (= 'let form) (tok-type? (ppeek p) :symbol) (bind-op? (ppeek p 1)))
+    (errors/reader-error "Write 'x := value' without 'let'"
+                         (error-data p (plast-loc p))))
+  (if (and (let-target? form) (bind-follows? p))
+    (do (padvance! p)
+        [let-stmt-tag form (parse-expr p)])
+    form))
 
 ;; ---------------------------------------------------------------------------
 
@@ -1843,8 +1839,7 @@
       (errors/reader-error "Unexpected end of input — expected a form" (error-data p (assoc (plast-loc p) :incomplete true))))
     (case (:type tok)
       :symbol
-      (let [s (:value tok)
-            start @(:pos p)]
+      (let [s (:value tok)]
         (padvance! p)
         (case s
           "nil" nil
@@ -1867,10 +1862,9 @@
                       args (parse-call-args p)]
                   (apply list class-sym args)))
               ;; fallback: 'new' as a regular symbol
-              (maybe-parse-let-stmt p start (maybe-call p 'new))))
+              (maybe-call p 'new)))
           ;; block keywords not followed by adjacent ( → block form
           ;; strip trailing colon (e.g. "defn:" → "defn") for dispatch
-          ;; Special case: "let x := expr" sugar — detected before block dispatch
           (let [[base-str colon-in-tok?] (strip-trailing-colon s)
                 dot-idx (str/last-index-of s ".")]
             (cond
@@ -1897,16 +1891,6 @@
                     args (parse-call-args p)]
                 (apply list (symbol method-str) (symbol obj-str) args))
 
-              ;; let-stmt sugar: let varname := expr
-              (and (= "let" base-str)
-                   (or (= start @(:stmt-start p)) (= start @(:top-start p)))
-                   (not (adjacent-open-paren? p))
-                   (tok-type? (ppeek p) :symbol)
-                   (bind-op? (ppeek p 1)))
-              (let [var-sym (symbol (:value (ppeek p)))]
-                (padvance! p) ; consume the variable name
-                (maybe-parse-let-stmt p start var-sym))
-
               :else
               ;; Block dispatch: resolve bare name to qualified symbol via
               ;; :resolve-sym hook (namespace-aware) or static block-name->sym
@@ -1927,7 +1911,7 @@
                                  (and nt (= (:line nt) (:line tok))
                                       (not (closer-types (:type nt))))))
                       (vswap! (:unstarted p) conj {:word base-str :line (:line tok) :col (:col tok)}))
-                    (maybe-parse-let-stmt p start (maybe-call p (symbol s))))))))))
+                    (maybe-call p (symbol s)))))))))
 
       :keyword
       (let [v (:value tok)]
@@ -2344,8 +2328,10 @@
         (errors/reader-error (str "Unexpected '" (str/replace (:value tok) #":$" "")
                                   "' — no block is open here")
                              (error-data p (select-keys tok [:line :col]))))
-      (let [form (do (vreset! (:top-start p) @(:pos p))
-                     (parse-expr p))]
+      (let [form (parse-expr p)]
+        (when (and (let-target? form) (bind-follows? p))
+          (errors/reader-error "':=' binds a name for the rest of a block body — at top level, use def"
+                               (error-data p (select-keys (ppeek p) [:line :col]))))
         (when-let [ctx (shapes/ns-context form @(:ns-ctx p))]
           (vreset! (:ns-ctx p) ctx))
         form))

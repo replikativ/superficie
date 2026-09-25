@@ -235,7 +235,9 @@ end
 ;; (defn step [s] (log s) (let [v (velocity s) x (* v 2)] (f x)))
 ```
 
-Only a statement can bind, and `:=` must follow the name on the same line; anywhere else `:=` is the keyword (`[x := y]`). At top level, use `def`.
+The left side is a name (`^long n` with a hint) or a destructuring vector or map: `[a b] := pair`, `{:keys [x]} := m`. Only a statement can bind, and `:=` must follow the name on the same line; anywhere else `:=` is the keyword (`[x := y]`). At top level, use `def`.
+
+The printer writes a `let` this way when it is the last form of a body. It keeps a block for a `let` used as a value, a `let` followed by other statements, a top-level `let`, and the inner `let` of `(let [a 1] (let [b 2] …))`, which would otherwise read back as one `let`.
 
 ## Pipe Operators
 

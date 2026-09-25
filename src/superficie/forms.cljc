@@ -204,3 +204,17 @@
     (shrub-container? node)
     (mapcat collect-shrub-errors (:items node))
     :else nil))
+
+;; ---------------------------------------------------------------------------
+;; Reserved words
+;; ---------------------------------------------------------------------------
+
+(def reserved-statement-words
+  "Names that, first in a body statement, the reader takes as a block word or a
+   block terminator rather than as a name: such a name cannot be bound with
+   `name := value`."
+  #{"defn" "defn-" "defmacro" "fn" "fn*" "if" "when" "when-not" "let" "letfn"
+    "binding" "with-open" "with-redefs" "cond" "case" "match" "try" "for" "doseq"
+    "loop" "dotimes" "ns" "def" "defonce" "defmulti" "defmethod" "defprotocol"
+    "defrecord" "deftype" "reify" "proxy"
+    "end" "else" "catch" "finally" "new"})

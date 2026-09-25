@@ -334,16 +334,87 @@
    block-body line width-aware; otherwise body lines are printed flat."
   nil)
 
+(defn- binding-target?
+  "Can x be the left side of `x := v`? The names and destructuring forms the
+   reader takes there."
+  [x]
+  (or (and (symbol? x) (nil? (namespace x))
+           (not (contains? @ops/*surface-index* (name x)))
+           (not (str/ends-with? (name x) ":"))
+           (not (contains? forms/reserved-statement-words (name x)))
+           (not (shapes/shaped-name? (name x)))
+           (not (#{'& '&form '&env} x)))
+      (and (vector? x) (empty? (forms/strip-internal-meta (meta x))))
+      (and (map? x) (not (record? x)) (empty? (forms/strip-internal-meta (meta x))))))
+
+(defn- statement-let?
+  "Can this form, in tail position of a body, print as `x := v` statements?
+   A plain let with a body, bindings without metadata, and no comments of its own."
+  [form]
+  (and (= *mode* :sup)
+       (seq? form) (= 'let (first form)) (>= (count form) 3)
+       (let [bs (second form)]
+         (and (vector? bs) (even? (count bs)) (seq bs)
+              (empty? (forms/strip-internal-meta (meta bs)))
+              (every? binding-target? (take-nth 2 bs))
+              ;; a bare block word as a value reads as a block after :=
+              (not-any? #(and (symbol? %) (nil? (namespace %))
+                              (or (contains? forms/reserved-statement-words (name %))
+                                  (shapes/shaped-name? (name %))))
+                        (take-nth 2 (rest bs)))))
+       (not (str/includes? (or (:ws (meta form)) "") ";"))))
+
+(defn- body-items
+  "A body's forms as printed lines: a let in tail position becomes its bindings
+   as [::bind name value] items followed by its own body, flattened the same
+   way. The reader makes each run of `:=` statements one let, so a let whose
+   body is a single let keeps that inner one as a block."
+  [forms]
+  (let [forms (vec forms)
+        tail (peek forms)]
+    (if (and tail (statement-let? tail))
+      (let [[_ bs & body] tail]
+        (concat (pop forms)
+                (map (fn [[k v]] [::bind k v]) (partition 2 bs))
+                (if (and (= 1 (count body)) (statement-let? (first body)))
+                  body
+                  (body-items body))))
+      forms)))
+
 (defn- print-body
   "Print forms as indented body lines (each on its own line)."
   [forms]
-  (let [inner (str *indent* "  ")]
+  (let [inner (str *indent* "  ")
+        line (fn [f col] (binding [*stmt-ok* true]
+                           (if *body-form-printer*
+                             (*body-form-printer* f col)
+                             (print-form f))))]
     (binding [*indent* inner]
-      (str/join "\n" (map #(str inner (binding [*stmt-ok* true]
-                                        (if *body-form-printer*
-                                          (*body-form-printer* % (count inner))
-                                          (print-form %))))
-                          forms)))))
+      (str/join "\n" (map (fn [item]
+                            (if (and (vector? item) (= ::bind (first item)))
+                              (let [[_ k v] item
+                                    lhs (str (print-form k) " := ")
+                                     ;; a comment above `x := v` is read onto x;
+                                     ;; the pretty-printer keeps comments
+                                    comments (when *body-form-printer*
+                                               (->> (str/split-lines (or (:ws (meta k)) ""))
+                                                    (map str/trim)
+                                                    (filter #(str/starts-with? % ";"))))]
+                                (str (apply str (map #(str inner % "\n") comments))
+                                     inner lhs (binding [*stmt-ok* false]
+                                                 (if *body-form-printer*
+                                                   (*body-form-printer* v (+ (count inner) (count lhs)))
+                                                   (print-form v)))))
+                              (let [t (line item (count inner))]
+                                (str inner
+                                      ;; `end - start` would close the block: a
+                                      ;; statement may not start with a terminator word
+                                     (if (and (= *mode* :sup)
+                                              (re-find #"^(end|else|catch|finally)(?![\w\-?!*'<>=/.:$#%&])" t)
+                                              (not (contains? block-terminator-syms item)))
+                                       (str "(" t ")")
+                                       t)))))
+                          (body-items forms))))))
 
 (defn- print-defn-block [head args]
   (let [head-str (clojure.core/name head)
