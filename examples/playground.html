@@ -231,10 +231,10 @@ const examples = [
 (deftm diffuse! [U :- (Array double) V :- (Array double)
                  W :- Long n :- Long k :- Double] :- Void
   (par/map-void! i n
-    (aset V i (+ (aget U i)
-                 (* k (- (+ (aget U (- i 1)) (aget U (+ i 1))
-                            (aget U (- i W)) (aget U (+ i W)))
-                         (* 4.0 (aget U i))))))))`
+    (let [lap (- (+ (aget U (- i 1)) (aget U (+ i 1))
+                    (aget U (- i W)) (aget U (+ i W)))
+                 (* 4.0 (aget U i)))]
+      (aset V i (+ (aget U i) (* k lap))))))`
   },
   {
     title: "Library macros: an ansatz definition and theorem",
@@ -246,7 +246,7 @@ const examples = [
     [nil 0]
     [(cons h t) (+ 1 (len t))]))
 
-(a/theorem add-zero [n :- Nat] (= Nat (+ n 0) n)
+(a/theorem add-zero [n :- Nat] (= (+ n 0) n)
   (simp Nat.add_zero))`
   },
   {
@@ -316,12 +316,6 @@ const examples = [
       (.close delegate))))`
   },
   {
-    title: "Comments",
-    clojure: `(defn area [r]
-  ;; classic formula
-  (* Math/PI r r))`
-  },
-  {
     title: "Hiccup UI component",
     clojure: `(defn user-table [users]
   [:table.data-table
@@ -371,17 +365,44 @@ function escapeHtml(s) {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
+// Superficie is laid out for a line width; render it for the width the code
+// panel has, so lines neither scroll sideways nor break early.
+function columnsFor(pre) {
+  var probe = document.createElement('span');
+  probe.style.cssText = 'position:absolute;visibility:hidden;white-space:pre;' +
+    'font-family:"JetBrains Mono","Fira Code","SF Mono",Menlo,monospace;font-size:0.875rem';
+  probe.textContent = '0'.repeat(40);
+  document.body.appendChild(probe);
+  var charWidth = probe.getBoundingClientRect().width / 40;
+  probe.remove();
+  var cs = getComputedStyle(pre);
+  var inner = pre.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+  return Math.max(40, Math.min(100, Math.floor(inner / charWidth) - 1));
+}
+
+function renderSup(src, pre) {
+  try {
+    return superficie.renderString(src, {width: columnsFor(pre)});
+  } catch (e) {
+    return ';; render error: ' + e.message;
+  }
+}
+
+// Fill each example's Superficie panel at that panel's width. A hidden panel
+// (tab mode) has no width yet, so it takes its visible sibling's.
+function fillExamples() {
+  document.querySelectorAll('#examples .example').forEach(function (el, i) {
+    var pres = el.querySelectorAll('.panel pre');
+    var supPre = el.querySelector('.panel[data-lang="superficie"] pre');
+    var measure = supPre.clientWidth ? supPre : pres[0];
+    var sup = renderSup(examples[i].clojure, measure);
+    supPre.querySelector('code').innerHTML = hljs.highlight(sup, {language: 'superficie'}).value;
+  });
+}
+
 function renderExamples() {
   const container = document.getElementById('examples');
   container.innerHTML = examples.map(ex => {
-    // Render superficie from Clojure source
-    let sup;
-    try {
-      sup = superficie.renderString(ex.clojure);
-    } catch (e) {
-      sup = ';; render error: ' + e.message;
-    }
-
     return `
     <div class="example mode-sidebyside">
       <div class="example-title">${escapeHtml(ex.title)}</div>
@@ -396,7 +417,7 @@ function renderExamples() {
         </div>
         <div class="panel" data-lang="superficie">
           <div class="panel-label">Superficie</div>
-          <pre><code class="language-superficie">${hljs.highlight(sup, {language: 'superficie'}).value}</code></pre>
+          <pre><code class="language-superficie"></code></pre>
         </div>
       </div>
     </div>`;
@@ -412,6 +433,7 @@ function renderExamples() {
       example.querySelector(`.panel[data-lang="${e.target.dataset.lang}"]`).classList.add('active');
     });
   });
+  fillExamples();
 }
 
 // Mode toggle
@@ -419,6 +441,15 @@ document.getElementById('mode-toggle').addEventListener('change', (e) => {
   document.querySelectorAll('.example').forEach(ex => {
     ex.classList.toggle('mode-sidebyside', e.target.checked);
   });
+  fillExamples();
+  updateOutput();
+});
+
+// Re-render for the new width after the window is resized
+var resizeTimer = null;
+window.addEventListener('resize', function () {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(function () { fillExamples(); updateOutput(); }, 150);
 });
 
 renderExamples();
@@ -444,7 +475,7 @@ function updateOutput() {
     return;
   }
   try {
-    var result = superficie.renderString(src);
+    var result = superficie.renderString(src, {width: columnsFor(tryOutput.parentElement)});
     tryOutput.className = 'language-superficie';
     tryOutput.innerHTML = hljs.highlight(result, {language: 'superficie'}).value;
   } catch (e) {

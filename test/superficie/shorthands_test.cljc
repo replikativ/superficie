@@ -87,6 +87,11 @@
     (is (thrown? #?(:clj Exception :cljs js/Error)
                  (core/sup->forms "match x:\n  | 1 => a\n  2 => b\nend")))))
 
+(deftest test-colon-after-a-number
+  (is (= "if i <= 1:\n  a\nend" (core/forms->sup '[(if (<= i 1) a)])))
+  (is (= "when x > 2.5:\n  a\nend" (core/forms->sup '[(when (> x 2.5) a)])))
+  (is (roundtrips? '[(if (<= i 1) a) (when (> x 2.5) a) (if (= n -1) a b)])))
+
 (deftest test-empty-defrecord
   (is (= "defrecord Empty [a b]: end" (core/forms->sup '[(defrecord Empty [a b])])))
   (is (roundtrips? '[(defrecord Empty [a b])])))

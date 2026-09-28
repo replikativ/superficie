@@ -294,6 +294,8 @@
   [expr-str]
   (cond
     (fusable-trailing-symbol? expr-str) (str expr-str ":")
+    ;; a plain decimal number reads as itself before ':' (`if i <= 1:`)
+    (re-find #"(?:^|[\s(\[,])[-+]?\d+(?:\.\d+)?$" expr-str) (str expr-str ":")
     (re-find #"[a-zA-Z0-9_!\?\*\-]$" expr-str) (str expr-str " :")
     :else (str expr-str ":")))
 

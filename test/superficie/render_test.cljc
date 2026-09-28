@@ -106,10 +106,10 @@
          (p/print-form '(fn [x] (println x) (+ x 1))))))
 
 (deftest test-if
-  (is (= "if x > 0 :\n  \"pos\"\nelse:\n  \"neg\"\nend"
+  (is (= "if x > 0:\n  \"pos\"\nelse:\n  \"neg\"\nend"
          (p/print-form '(if (> x 0) "pos" "neg"))))
   (testing "without else"
-    (is (= "if x > 0 :\n  \"pos\"\nend"
+    (is (= "if x > 0:\n  \"pos\"\nend"
            (p/print-form '(if (> x 0) "pos"))))))
 
 (deftest test-let
@@ -117,7 +117,7 @@
          (p/print-form '(let [x 1] (+ x 2))))))
 
 (deftest test-when
-  (is (= "when x > 0 :\n  println(\"pos\")\nend"
+  (is (= "when x > 0:\n  println(\"pos\")\nend"
          (p/print-form '(when (> x 0) (println "pos"))))))
 
 (deftest test-case
