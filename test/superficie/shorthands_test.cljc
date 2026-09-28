@@ -92,6 +92,11 @@
   (is (= "when x > 2.5:\n  a\nend" (core/forms->sup '[(when (> x 2.5) a)])))
   (is (roundtrips? '[(if (<= i 1) a) (when (> x 2.5) a) (if (= n -1) a b)])))
 
+(deftest test-empty-ns
+  (is (= "ns user: end" (core/forms->sup '[(ns user)])))
+  (is (= "ns user \"Doc.\": end" (core/forms->sup '[(ns user "Doc.")])))
+  (is (roundtrips? '[(ns user) (ns user "Doc.") (ns ^:no-doc user)])))
+
 (deftest test-empty-defrecord
   (is (= "defrecord Empty [a b]: end" (core/forms->sup '[(defrecord Empty [a b])])))
   (is (roundtrips? '[(defrecord Empty [a b])])))
