@@ -684,32 +684,35 @@
     (str "ns " (print-form name-sym)
          (when docstring (str " " (print-docstring docstring)))
          (when attr-map  (str " " (print-form attr-map)))
-         ":\n"
-         (binding [*indent* inner]
-           (str/join "\n"
-                     (map (fn [clause]
+         ;; no clauses: one line, as an empty defrecord prints
+         (if (empty? clauses) ": end" ":\n")
+         (when (seq clauses)
+           (str
+            (binding [*indent* inner]
+              (str/join "\n"
+                        (map (fn [clause]
                             ;; Reader-conditional ns clauses (#?(:clj (:import ...)))
                             ;; can't be expressed as keyword sub-clauses — fall back
                             ;; to print-form which emits them as #?(...) expressions.
-                            (if (forms/sup-reader-conditional? clause)
-                              (str inner (print-form clause))
-                              (let [kw   (first clause)
-                                    items (rest clause)]
-                                (str inner (name kw) ":\n"
-                                     (str/join "\n"
-                                               (map #(str inner "  "
+                               (if (forms/sup-reader-conditional? clause)
+                                 (str inner (print-form clause))
+                                 (let [kw   (first clause)
+                                       items (rest clause)]
+                                   (str inner (name kw) ":\n"
+                                        (str/join "\n"
+                                                  (map #(str inner "  "
                                                           ;; :import list specs (java.pkg Class ...)
                                                           ;; would print as java.pkg(Class ...) which
                                                           ;; the reader misreads as (.pkg java Class ...).
                                                           ;; Emit as [java.pkg Class ...] (vector) instead;
                                                           ;; the reader converts import vectors back to lists.
-                                                          (if (and (= kw :import) (seq? %))
-                                                            (str "[" (join-forms %) "]")
-                                                            (print-form %)))
-                                                    items))
-                                     "\n" inner "end"))))
-                          clauses)))
-         "\n" *indent* "end")))
+                                                             (if (and (= kw :import) (seq? %))
+                                                               (str "[" (join-forms %) "]")
+                                                               (print-form %)))
+                                                       items))
+                                        "\n" inner "end"))))
+                             clauses)))
+            "\n" *indent* "end")))))
 
 (defn- print-arm
   "One match arm, `prefix pattern => body`. A multi-line body (a block) goes on
