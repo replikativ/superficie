@@ -709,6 +709,17 @@
                           clauses)))
          "\n" *indent* "end")))
 
+(defn- print-arm
+  "One match arm, `prefix pattern => body`. A multi-line body (a block) goes on
+   its own line under the arm, so its own lines indent from there."
+  [inner prefix pat-str body]
+  (let [one-line (str inner prefix pat-str " => " (print-form body))]
+    (if (str/includes? one-line "\n")
+      (let [body-indent (str inner "  ")]
+        (str inner prefix pat-str " =>\n"
+             body-indent (binding [*indent* body-indent] (print-form body))))
+      one-line)))
+
 (defn- print-match-block [head args]
   (let [[expr & clauses] args
         pairs (partition 2 clauses)
@@ -719,7 +730,7 @@
       (str (clojure.core/name head) " " (colon-sep (print-form expr)) "\n"
            (binding [*indent* inner]
              (str/join "\n" (map (fn [[pat body]]
-                                   (str inner "| " (print-form pat) " => " (print-form body)))
+                                   (print-arm inner "| " (print-form pat) body))
                                  clauses)))
            "\n" *indent* "end")
       (if *match-arms*
@@ -732,7 +743,7 @@
                          (map (fn [[pat result]]
                             ;; :else catch-all → print as bare _ wildcard
                                 (let [pat-str (if (= :else pat) "_" (print-form pat))]
-                                  (str inner pat-str " => " (print-form result))))
+                                  (print-arm inner "" pat-str result)))
                               pairs)))
              "\n" *indent* "end")))))
 
@@ -1177,8 +1188,14 @@
               body (if (#{['%1] ['%1 '& '%&]} (second form))
                      ;; (not a #() literal here: the reader would rewrite the quoted %)
                      (rename-syms (fn [s] (if (= '%1 s) (symbol "%") s)) body)
-                     body)]
-          (str "#(" (print-form body) ")"))
+                     body)
+              b (print-form body)]
+          (cond
+            (= *mode* :sup) (str "#(" b ")")
+            ;; Clojure's #(…) is itself the body's list: #(inc %), not #((inc %))
+            (and (seq? body) (str/starts-with? b "(") (str/ends-with? b ")")) (str "#" b)
+            ;; any other body (%, [% 1], 'x, @a) is a value: #(%) would call it
+            :else (str "#(do " b ")")))
 
         ;; #(…) from Clojure source: the reader's fn* with p1__N# parameters
         (and (= *mode* :sup) (clj-anon-fn form))

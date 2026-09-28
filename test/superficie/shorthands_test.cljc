@@ -36,7 +36,15 @@
     (is (roundtrips? '[(every? #(contains? b %) (keys a))]))
     (is (roundtrips? '[(defmacro m [x] `(map #(list ~x %) xs))])))
   (testing "a #() inside a block header's brackets"
-    (is (roundtrips? '[(defn f [x] (let [a (map #(g %) x)] a))]))))
+    (is (roundtrips? '[(defn f [x] (let [a (map #(g %) x)] a))])))
+  (testing "to Clojure: a call body is #()'s own list; any other body is a value"
+    (is (= "(map #(inc %) xs)" (core/sup->clj "map(#(inc(%)), xs)")))
+    (is (= "(map #(+ %1 %2) xs ys)" (core/sup->clj "map(#(%1 + %2), xs, ys)")))
+    (is (= "(f #(do %))" (core/sup->clj "f(#(%))")))
+    (is (= "(f #(do [% 1]))" (core/sup->clj "f(#([%, 1]))"))))
+  (testing "#() does not nest, as in Clojure; an arrow inside one does"
+    (is (thrown? #?(:clj Exception :cljs js/Error) (core/sup->forms "#(g(#(h(%))))")))
+    (is (= "#(map (fn [x] (+ x %)) xs)" (core/sup->clj "#(map(x -> x + %, xs))")))))
 
 (deftest test-arrow-lambdas
   (testing "a one-line fn with plain parameters, as a call argument"
@@ -66,6 +74,15 @@
     (is (str/includes? (core/pprint-sup forms)
                        "  match xs:\n    | nil => 0\n    | cons(h, t) => 1 + len(t)\n  end"))
     (is (roundtrips? forms)))
+  (testing "a multi-line arm body goes on its own line under the arm"
+    (let [forms [kernel-ns
+                 '(a/defn m [t :- (RBTree Nat), k :- Nat] Bool
+                    (match t
+                      [leaf false]
+                      [(node c l x r) (if (< k x) (m l k) (m r k))]))]]
+      (is (str/includes? (core/pprint-sup forms)
+                         "    | node(c, l, x, r) =>\n      if k < x:\n        m(l, k)\n      else:\n        m(r, k)\n      end\n  end"))
+      (is (roundtrips? forms))))
   (testing "mixing arm styles is an error"
     (is (thrown? #?(:clj Exception :cljs js/Error)
                  (core/sup->forms "match x:\n  | 1 => a\n  2 => b\nend")))))
