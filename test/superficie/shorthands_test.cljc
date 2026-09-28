@@ -36,7 +36,15 @@
     (is (roundtrips? '[(every? #(contains? b %) (keys a))]))
     (is (roundtrips? '[(defmacro m [x] `(map #(list ~x %) xs))])))
   (testing "a #() inside a block header's brackets"
-    (is (roundtrips? '[(defn f [x] (let [a (map #(g %) x)] a))]))))
+    (is (roundtrips? '[(defn f [x] (let [a (map #(g %) x)] a))])))
+  (testing "to Clojure: a call body is #()'s own list; any other body is a value"
+    (is (= "(map #(inc %) xs)" (core/sup->clj "map(#(inc(%)), xs)")))
+    (is (= "(map #(+ %1 %2) xs ys)" (core/sup->clj "map(#(%1 + %2), xs, ys)")))
+    (is (= "(f #(do %))" (core/sup->clj "f(#(%))")))
+    (is (= "(f #(do [% 1]))" (core/sup->clj "f(#([%, 1]))"))))
+  (testing "#() does not nest, as in Clojure; an arrow inside one does"
+    (is (thrown? #?(:clj Exception :cljs js/Error) (core/sup->forms "#(g(#(h(%))))")))
+    (is (= "#(map (fn [x] (+ x %)) xs)" (core/sup->clj "#(map(x -> x + %, xs))")))))
 
 (deftest test-arrow-lambdas
   (testing "a one-line fn with plain parameters, as a call argument"

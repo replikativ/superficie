@@ -1177,8 +1177,14 @@
               body (if (#{['%1] ['%1 '& '%&]} (second form))
                      ;; (not a #() literal here: the reader would rewrite the quoted %)
                      (rename-syms (fn [s] (if (= '%1 s) (symbol "%") s)) body)
-                     body)]
-          (str "#(" (print-form body) ")"))
+                     body)
+              b (print-form body)]
+          (cond
+            (= *mode* :sup) (str "#(" b ")")
+            ;; Clojure's #(…) is itself the body's list: #(inc %), not #((inc %))
+            (and (seq? body) (str/starts-with? b "(") (str/ends-with? b ")")) (str "#" b)
+            ;; any other body (%, [% 1], 'x, @a) is a value: #(%) would call it
+            :else (str "#(do " b ")")))
 
         ;; #(…) from Clojure source: the reader's fn* with p1__N# parameters
         (and (= *mode* :sup) (clj-anon-fn form))

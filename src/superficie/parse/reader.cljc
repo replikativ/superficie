@@ -52,7 +52,9 @@
     ;; true inside a block whose shape has :dotted-calls — A.b(x) is (A.b x)
     :dotted-calls   (volatile! false)
     ;; {:get f :set g} inside a block whose shape has :index (x[i] → (aget x i))
-    :index-sym      (volatile! nil)}))
+    :index-sym      (volatile! nil)
+    ;; true inside #(…): Clojure's #() cannot nest
+    :in-anon-fn     (volatile! false)}))
 
 (defn- peof? [{:keys [tokens pos]}]
   (>= @pos (count tokens)))
@@ -2117,8 +2119,13 @@
       :open-anon-fn
       ;; #() — parse body as sup, collect % params, emit (fn [params] body).
       ;; The body is an expression, so #(% * %) and #(% + 1) work.
-      (do (padvance! p)
-          (let [body (parse-expr p)
+      (do (when @(:in-anon-fn p)
+            (errors/reader-error "Nested #() is not allowed, as in Clojure — write the inner function as x -> body or fn"
+                                 (error-data p (select-keys tok [:line :col]))))
+          (padvance! p)
+          (let [body (do (vreset! (:in-anon-fn p) true)
+                         (try (parse-expr p)
+                              (finally (vreset! (:in-anon-fn p) false))))
                 _ (when (discard-sentinel? body)
                     (errors/reader-error "#() body was discarded — #() requires a non-discarded expression"
                                          (error-data p (select-keys tok [:line :col]))))
