@@ -709,6 +709,17 @@
                           clauses)))
          "\n" *indent* "end")))
 
+(defn- print-arm
+  "One match arm, `prefix pattern => body`. A multi-line body (a block) goes on
+   its own line under the arm, so its own lines indent from there."
+  [inner prefix pat-str body]
+  (let [one-line (str inner prefix pat-str " => " (print-form body))]
+    (if (str/includes? one-line "\n")
+      (let [body-indent (str inner "  ")]
+        (str inner prefix pat-str " =>\n"
+             body-indent (binding [*indent* body-indent] (print-form body))))
+      one-line)))
+
 (defn- print-match-block [head args]
   (let [[expr & clauses] args
         pairs (partition 2 clauses)
@@ -719,7 +730,7 @@
       (str (clojure.core/name head) " " (colon-sep (print-form expr)) "\n"
            (binding [*indent* inner]
              (str/join "\n" (map (fn [[pat body]]
-                                   (str inner "| " (print-form pat) " => " (print-form body)))
+                                   (print-arm inner "| " (print-form pat) body))
                                  clauses)))
            "\n" *indent* "end")
       (if *match-arms*
@@ -732,7 +743,7 @@
                          (map (fn [[pat result]]
                             ;; :else catch-all → print as bare _ wildcard
                                 (let [pat-str (if (= :else pat) "_" (print-form pat))]
-                                  (str inner pat-str " => " (print-form result))))
+                                  (print-arm inner "" pat-str result)))
                               pairs)))
              "\n" *indent* "end")))))
 

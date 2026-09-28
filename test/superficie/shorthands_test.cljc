@@ -74,6 +74,15 @@
     (is (str/includes? (core/pprint-sup forms)
                        "  match xs:\n    | nil => 0\n    | cons(h, t) => 1 + len(t)\n  end"))
     (is (roundtrips? forms)))
+  (testing "a multi-line arm body goes on its own line under the arm"
+    (let [forms [kernel-ns
+                 '(a/defn m [t :- (RBTree Nat), k :- Nat] Bool
+                    (match t
+                      [leaf false]
+                      [(node c l x r) (if (< k x) (m l k) (m r k))]))]]
+      (is (str/includes? (core/pprint-sup forms)
+                         "    | node(c, l, x, r) =>\n      if k < x:\n        m(l, k)\n      else:\n        m(r, k)\n      end\n  end"))
+      (is (roundtrips? forms))))
   (testing "mixing arm styles is an error"
     (is (thrown? #?(:clj Exception :cljs js/Error)
                  (core/sup->forms "match x:\n  | 1 => a\n  2 => b\nend")))))
