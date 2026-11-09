@@ -535,6 +535,30 @@
              (meta form))
     (extract-comments (:ws (meta form)))))
 
+(defn- form-parts
+  "The forms directly inside form, for finding the comments within it."
+  [form]
+  (cond
+    (forms/raw? form) nil
+    (forms/sup-reader-conditional? form) [(forms/rc-form form)]
+    (and (record? form) (contains? form :form)) [(:form form)]
+    (record? form) nil
+    (map? form) (mapcat identity form)
+    (coll? form) (seq form)
+    :else nil))
+
+(defn- inner-comments
+  "The forms inside form (not form itself) that carry leading comments, in
+   reading order."
+  [form]
+  (mapcat (fn [x] (if (form-comments x) (cons x (inner-comments x)) (inner-comments x)))
+          (form-parts form)))
+
+(def ^:private ^:dynamic *comments-in-input*
+  "Whether the forms being printed carry any comments; when not, the
+   bookkeeping for comments a layout leaves out is skipped."
+  false)
+
 ;; ---------------------------------------------------------------------------
 ;; Main dispatch
 ;; ---------------------------------------------------------------------------
@@ -573,11 +597,97 @@
     (pp* form col width)
     (binding [printer/*arrow-ok* false printer/*stmt-ok* false] (pp* form col width))))
 
+(declare pp-layout)
+
+(defn- prepend-comments
+  "Write comment lines above formatted. The first line takes the caller's
+   indentation, the rest and formatted are indented to col; each comment's
+   original indentation is dropped."
+  [comments col formatted]
+  (if comments
+    (let [indent (indent-str col)
+          stripped (map str/triml comments)]
+      (str (str/join (str "\n" indent) stripped) "\n" indent formatted))
+    formatted))
+
+(def ^:private ^:dynamic *comments-here*
+  "False while printing a form right after a prefix (` ~ @ '): its comments
+   then go above the prefixed form instead of between prefix and form."
+  true)
+
+(defn- pp-prefixed
+  "Pretty-print form written directly after a prefix."
+  [form col width]
+  (binding [*comments-here* false] (pp form col width)))
+
+(defn- comment-texts
+  "How often each possible comment text occurs in s: for each ; in a line,
+   the rest of that line (a comment is written up to its line's end)."
+  [s]
+  (persistent!
+   (reduce (fn [acc line]
+             (loop [from 0 acc acc]
+               (if-let [i (str/index-of line ";" from)]
+                 (let [t (subs line i)]
+                   (recur (inc i) (assoc! acc t (inc (get acc t 0)))))
+                 acc)))
+           (transient {})
+           (filter #(str/includes? % ";") (str/split-lines s)))))
+
+(defn- comments-not-in
+  "The comment lines of forms (forms carrying leading comments) that s does
+   not contain, in source order; those of `own` are always included.
+   (Checking the text, not which comments were rendered, ignores the
+   layouts a printer tried and dropped.)"
+  [own forms s]
+  (let [avail (volatile! (when (seq forms) (comment-texts s)))
+        written? (fn [line]
+                   (let [n (get @avail line 0)]
+                     (vswap! avail assoc line (max 0 (dec n)))
+                     (pos? n)))
+        groups (keep (fn [f]
+                       (let [ls (map str/triml (form-comments f))]
+                         (when-let [ls (not-empty (if (identical? f own) ls (remove written? ls)))]
+                           [(:ws-line (meta f)) ls])))
+                     (cond->> forms own (cons own)))]
+    (mapcat second (if (every? (comp number? first) groups)
+                     (sort-by first groups)
+                     groups))))
+
+(defn- comments-left-out
+  "Render with (render), the leading comments of forms left to the caller;
+   return [the comment lines in forms the rendering does not contain,
+   rendering]."
+  [forms render]
+  (let [s (binding [*comments-here* false] (render))]
+    [(not-empty (comments-not-in nil
+                                 (mapcat #(if (form-comments %) (cons % (inner-comments %)) (inner-comments %))
+                                         forms)
+                                 s))
+     s]))
+
 (defn- pp*
   [form col width]
-  (let [comments (form-comments form)
-        indent (indent-str col)
-        meta-info (pp-meta-prefix form)
+  (cond
+    (not *comments-in-input*)
+    (prepend-comments (form-comments form) col (pp-layout form col width))
+
+    (not *comments-here*)
+    (binding [*comments-here* true] (pp-layout form col width))
+
+    ;; The comments inside form that its layout left out (a header part
+    ;; prints flat, without comments) are written above it with its own.
+    :else
+    (let [formatted (pp-layout form col width)]
+      (prepend-comments (not-empty (comments-not-in (when (form-comments form) form)
+                                                    (inner-comments form)
+                                                    formatted))
+                        col formatted))))
+
+(defn- pp-layout
+  "The layout of form at col, without its leading comments."
+  [form col width]
+  (let [meta-info (pp-meta-prefix form)
         formatted (cond
                     ;; Metadata prefix — emit before the form, recurse on stripped
                     meta-info
@@ -594,14 +704,14 @@
 
                     ;; @deref — always use shorthand
                     (and (call? form) (= 'clojure.core/deref (first form)) (= 2 (count form)))
-                    (str "@" (pp (second form) (inc col) width))
+                    (str "@" (pp-prefixed (second form) (inc col) width))
 
                     ;; 'quote — always use shorthand
                     (and (call? form) (= 'quote (first form)) (= 2 (count form)))
                     (if (printer/quoted-as-sexp? (second form) (subs (flat form) 1))
                       (flat form)
                       (str "'" (binding [printer/*in-quote* true]
-                                 (pp (second form) (inc col) width))))
+                                 (pp-prefixed (second form) (inc col) width))))
 
                     ;; #'var — always use shorthand
                     (and (call? form) (= 'var (first form)) (= 2 (count form)))
@@ -651,13 +761,13 @@
                     (forms/syntax-quote? form)
                     (if (printer/infix-form? (:form form))
                       (flat form)
-                      (str "`" (pp (:form form) (inc col) width)))
+                      (str "`" (pp-prefixed (:form form) (inc col) width)))
 
                     (forms/unquote? form)
-                    (str "~" (pp (:form form) (inc col) width))
+                    (str "~" (pp-prefixed (:form form) (inc col) width))
 
                     (forms/unquote-splicing? form)
-                    (str "~@" (pp (:form form) (+ col 2) width))
+                    (str "~@" (pp-prefixed (:form form) (+ col 2) width))
 
                     ;; AST node defrecords satisfy (map? x) — delegate to flat
                     ;; Must be before vector?/map? to avoid mishandling
@@ -671,15 +781,7 @@
 
                     ;; Everything else ��� flat (primitives, empty list, etc.)
                     :else (flat form))]
-    (if comments
-      ;; First comment line: no indent (caller provides it via join/concat).
-      ;; Subsequent comment lines: indent to current column.
-      ;; All lines: strip original whitespace ��� pprint re-indents.
-      (let [stripped (map str/triml comments)
-            indented (cons (first stripped)
-                           (map #(str indent %) (rest stripped)))]
-        (str (str/join "\n" indented) "\n" indent formatted))
-      formatted)))
+    formatted))
 
 ;; ---------------------------------------------------------------------------
 ;; Public API
@@ -693,7 +795,9 @@
   ([form opts]
    (let [width (or (:width opts) default-width)]
      (binding [printer/*width* width
-               printer/*body-form-printer* (fn [f col] (pp f col width))]
+               printer/*body-form-printer* (fn [f col] (pp f col width))
+               printer/*comments-left-out* comments-left-out
+               *comments-in-input* (boolean (or (form-comments form) (seq (inner-comments form))))]
        (pp form 0 width)))))
 
 (defn- form-separator
@@ -706,7 +810,12 @@
                                :cljs (satisfies? IMeta prev-form))
                             (meta prev-form))
                    (:end-line (meta prev-form)))
-        next-start (elem-line next-form)]
+        next-start (or (when (and (some? next-form)
+                                  #?(:clj  (instance? clojure.lang.IMeta next-form)
+                                     :cljs (satisfies? IMeta next-form)))
+                         ;; a form's leading comments start where it begins
+                         (:ws-line (meta next-form)))
+                       (elem-line next-form))]
     (if (and prev-end next-start (= next-start (inc prev-end)))
       "\n"
       "\n\n")))
@@ -728,6 +837,16 @@
                       seps (mapv (fn [[a b]] (form-separator a b)) pairs)]
                   (apply str (first rendered)
                          (mapcat vector seps (rest rendered)))))]
-     (if trailing-comments
-       (str body "\n\n" (str/join "\n" trailing-comments))
-       body))))
+     (cond
+       (not trailing-comments) body
+       (str/blank? body) (str/join "\n" trailing-comments)
+       :else
+       ;; comments right after the last form follow it on the next line
+       (let [last-end (let [f (last forms)]
+                        (when (and (some? f)
+                                   #?(:clj  (instance? clojure.lang.IMeta f)
+                                      :cljs (satisfies? IMeta f)))
+                          (:end-line (meta f))))
+             t-line (:trailing-ws-line (meta forms))
+             sep (if (and last-end t-line (<= t-line (inc last-end))) "\n" "\n\n")]
+         (str body sep (str/join "\n" trailing-comments)))))))

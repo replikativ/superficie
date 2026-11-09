@@ -553,6 +553,11 @@ user=> square(7)
 (sup/clj->sup "(defn f [x] (+ x 1))")
 ;; => "defn f [x]:\n  x + 1\nend"
 
+;; Comments are kept: a comment at the end of a line moves above that code
+(sup/clj->sup "(def x 1) ; one")
+;; => "; one\ndef x: 1"
+;; {:comments false} drops them
+
 ;; Superficie string → Clojure source string
 (sup/sup->clj "defn f [x]:\n  x + 1\nend")
 ;; => "(defn f [x] (+ x 1))"
@@ -584,6 +589,11 @@ renderString('(defn f [x] (+ x 1))');
 // Superficie → Clojure
 parseString('defn f [x]:\n  x + 1\nend');
 // => '(defn f [x] (+ x 1))'
+
+// Comments are kept; one at the end of a line moves above that code.
+// {comments: false} drops them.
+renderString('(defn power [n x] ; the meaning\n  (if (= n 0) 1 (* x (power (dec n) x))))');
+// => '; the meaning\ndefn power [n x]:\n  if n = 0:\n    1\n  else:\n    x * power(dec(n), x)\n  end\nend'
 
 // A snippet without its ns form: name the requires it assumes,
 // so library macros render as blocks

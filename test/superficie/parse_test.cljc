@@ -281,3 +281,10 @@
 (deftest test-multiple-forms
   (is (= ['(def x 42) '(println x)]
          (core/sup->forms "def x: 42\nprintln(x)"))))
+
+(deftest test-lone-u-and-o-characters
+  (testing "\\u and \\o without digits are the characters u and o"
+    (is (= "f(\\u, \\o)" (core/forms->sup (core/sup->forms "f(\\u, \\o)"))))
+    #?(:clj (is (= '[(f \u \o)] (core/sup->forms "f(\\u, \\o)")))))
+  (testing "an incomplete escape is still an error"
+    (is (thrown? #?(:clj Exception :cljs js/Error) (core/sup->forms "f(\\u00)")))))

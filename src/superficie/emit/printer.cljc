@@ -55,6 +55,17 @@
             {:sup/sugar true}))))))
 
 ;; ---------------------------------------------------------------------------
+;; Comments
+;; ---------------------------------------------------------------------------
+
+(def ^:dynamic *comments-left-out*
+  "Bound by the pretty-printer to (fn [forms render]) => [comment-lines s]:
+   s is (render), with the forms' leading comments left to the caller, and
+   comment-lines are the comments in forms that s does not contain. nil when
+   comments are not kept."
+  nil)
+
+;; ---------------------------------------------------------------------------
 ;; Mode — :sup or :clj
 ;; ---------------------------------------------------------------------------
 
@@ -396,17 +407,17 @@
                             (if (and (vector? item) (= ::bind (first item)))
                               (let [[_ k v] item
                                     lhs (str (print-form k) " := ")
-                                     ;; a comment above `x := v` is read onto x;
-                                     ;; the pretty-printer keeps comments
-                                    comments (when *body-form-printer*
-                                               (->> (str/split-lines (or (:ws (meta k)) ""))
-                                                    (map str/trim)
-                                                    (filter #(str/starts-with? % ";"))))]
-                                (str (apply str (map #(str inner % "\n") comments))
-                                     inner lhs (binding [*stmt-ok* false]
-                                                 (if *body-form-printer*
-                                                   (*body-form-printer* v (+ (count inner) (count lhs)))
-                                                   (print-form v)))))
+                                    render #(binding [*stmt-ok* false]
+                                              (if *body-form-printer*
+                                                (*body-form-printer* v (+ (count inner) (count lhs)))
+                                                (print-form v)))
+                                    ;; the comments of x and v go above `x := v`
+                                    ;; (where the reader reads them onto x)
+                                    [comments rhs] (if *comments-left-out*
+                                                     (*comments-left-out* [k v] render)
+                                                     [nil (render)])]
+                                (str (apply str (map #(str inner (str/triml %) "\n") comments))
+                                     inner lhs rhs))
                               (let [t (line item (count inner))]
                                 (str inner
                                       ;; `end - start` would close the block: a

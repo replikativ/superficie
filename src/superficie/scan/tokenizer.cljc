@@ -149,7 +149,8 @@
                 (if (and (< i 4) (not (at-end? sc)) (hex? (peek1 sc)))
                   (do (sb+ b (advance! sc)) (recur (inc i)))
                   i))]
-        (when (< n 4)
+        ;; \u alone is the character u
+        (when (< 0 n 4)
           (errors/reader-error
            (str "Incomplete unicode escape: expected 4 hex digits after \\u, got " n)
            (cond-> start (at-end? sc) (assoc :incomplete true)))))
