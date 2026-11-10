@@ -201,16 +201,31 @@
                (splice-result? form) (recur (into forms form))
                :else (recur (conj forms form))))))))))
 
+(defn- span
+  "Source span of what was parsed since start-tok, as form metadata: start
+   at start-tok, end just past the last consumed token (the comments in
+   superficie.comments are placed by it)."
+  [p start-tok]
+  (let [i (dec @(:pos p))
+        end-tok (when (< -1 i (count (:tokens p))) (nth (:tokens p) i))]
+    (merge (when (:line start-tok)
+             {:line (:line start-tok) :column (:col start-tok)})
+           (when (and end-tok (:line end-tok))
+             {:end-line   (or (:end-line end-tok) (:line end-tok))
+              :end-column (or (:end-col end-tok) (inc (:col end-tok)))}))))
+
 (defn- parse-vector [p]
-  (let [loc (select-keys (ppeek p) [:line :col])]
+  (let [start (ppeek p)
+        loc (select-keys start [:line :col])]
     (padvance! p) ; [
     (vswap! (:bracket-depth p) inc)
     (let [result (vec (parse-forms-until p :close-bracket loc))]
       (vswap! (:bracket-depth p) dec)
-      result)))
+      (with-meta result (span p start)))))
 
 (defn- parse-map [p]
-  (let [loc (select-keys (ppeek p) [:line :col])]
+  (let [start (ppeek p)
+        loc (select-keys start [:line :col])]
     (padvance! p) ; {
     (let [forms (parse-forms-until p :close-brace loc)]
       (when (odd? (count forms))
@@ -222,10 +237,11 @@
           (let [dup (first (filter (fn [k] (> (count (filter #(= k %) keys)) 1)) keys))]
             (errors/reader-error (str "Duplicate key in map literal: " (pr-str dup))
                                  (error-data p loc))))
-        m))))
+        (with-meta m (span p start))))))
 
 (defn- parse-set [p]
-  (let [loc (select-keys (ppeek p) [:line :col])]
+  (let [start (ppeek p)
+        loc (select-keys start [:line :col])]
     (padvance! p) ; #{
     (let [forms (parse-forms-until p :close-brace loc)
           s (set forms)]
@@ -234,7 +250,7 @@
               dup (first (filter (fn [x] (if (contains? @seen x) true (do (vswap! seen conj x) false))) forms))]
           (errors/reader-error (str "Duplicate element in set literal: " (pr-str dup))
                                (error-data p loc))))
-      (with-meta s {:sup/order (vec forms)}))))
+      (with-meta s (assoc (span p start) :sup/order (vec forms))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Call: f(args...)
@@ -790,7 +806,8 @@
 
          (and (tok-type? (ppeek p) :symbol)
               (#{"catch" "catch:"} (:value (ppeek p))))
-         (let [_ (padvance! p) ; consume catch/catch:
+         (let [start (ppeek p)
+               _ (padvance! p) ; consume catch/catch:
               ;; catch needs [ExType e] binding
                _ (when-not (tok-type? (ppeek p) :open-bracket)
                    (errors/reader-error "Expected '[ExceptionType binding]' after catch"
@@ -798,16 +815,18 @@
                binding (parse-vector p) ; [ExType e]
                _ (consume-colon! p false "catch" (select-keys tok [:line :col]))
                catch-body (parse-body p)]
-           (recur (conj clauses (apply list 'catch (concat binding catch-body)))))
+           (recur (conj clauses (with-meta (apply list 'catch (concat binding catch-body))
+                                  (span p start)))))
 
          (and (tok-type? (ppeek p) :symbol)
               (#{"finally" "finally:"} (:value (ppeek p))))
-         (let [finally-val (:value (ppeek p))
+         (let [start (ppeek p)
+               finally-val (:value start)
                _ (padvance! p) ; consume finally/finally:
                colon-in-finally? (str/ends-with? finally-val ":")
                _ (consume-colon! p colon-in-finally? "finally" (select-keys tok [:line :col]))
                finally-body (parse-body p)]
-           (recur (conj clauses (apply list 'finally finally-body))))
+           (recur (conj clauses (with-meta (apply list 'finally finally-body) (span p start)))))
 
          :else
          (errors/reader-error "Expected 'catch', 'finally', or 'end' in try block"
@@ -2174,13 +2193,6 @@
   #?(:clj  (instance? clojure.lang.IObj x)
      :cljs (implements? IWithMeta x)))
 
-(defn- attach-ws
-  "Attach :ws metadata from a token to a form, if the form supports metadata."
-  [form ws]
-  (if (and ws (metadatable? form))
-    (vary-meta form assoc :ws ws)
-    form))
-
 (defn- adjacent-dot-method?
   "True if next token is an adjacent symbol starting with '.' but not '.-'.
    Used for postfix method chaining: obj.method(args)."
@@ -2243,11 +2255,10 @@
 
 (defn- parse-form
   "Parse a single surface form.
-   Attaches :ws (leading whitespace) and :line/:column source location
-   as metadata on forms that support it."
+   Attaches :line/:column and :end-line/:end-column source location as
+   metadata on forms that support it."
   [p]
   (let [start-tok (ppeek p)
-        ws        (:ws start-tok)
         depth     (vswap! (:depth p) inc)]
     (try
       (when (> depth max-depth)
@@ -2255,18 +2266,18 @@
                              (error-data p (merge {:depth depth} (when-let [tok (ppeek p)]
                                                                    (select-keys tok [:line :col]))))))
       (let [form  (parse-form-base p)
-            form' (parse-call-chain p form)
-            form' (attach-ws form' ws)]
+            form' (parse-call-chain p form)]
         ;; Attach source location to any form that supports metadata.
         ;; Uses :line (1-indexed) and :column (1-indexed) to match
-        ;; clojure.lang.LispReader and tooling conventions.
+        ;; clojure.lang.LispReader and tooling conventions; the end (just
+        ;; past the last token) places the comments (superficie.comments).
         (if (and start-tok
                  (not (discard-sentinel? form'))
-                 #?(:clj  (instance? clojure.lang.IMeta form')
-                    :cljs (satisfies? IMeta form')))
+                 (metadatable? form'))
           (vary-meta form' merge
                      {:line   (:line start-tok)
-                      :column (:col  start-tok)})
+                      :column (:col  start-tok)}
+                     (span p start-tok))
           form'))
       (finally
         (vswap! (:depth p) dec)))))

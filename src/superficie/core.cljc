@@ -10,12 +10,13 @@
      superficie.pipeline/run — full ctx->ctx pipeline with intermediate state"
   (:require [superficie.emit.printer :as printer]
             [superficie.shapes :as shapes]
+            [superficie.comments :as comments]
             [superficie.emit.pprint :as pprint]
             [superficie.forms :as forms]
             [superficie.parse.expander :as expander]
             [superficie.pipeline :as pipeline]
             #?(:cljs [superficie.parse.resolve :as resolve])
-            [clojure.string :as str]
+            #?(:cljs [clojure.string :as str])
             #?(:clj  [clojure.tools.reader :as tr])
             #?(:clj  [clojure.tools.reader.reader-types :as tr-types])
             #?(:cljs [cljs.tools.reader :as cljs-reader])
@@ -34,12 +35,17 @@
                         to keywords at read time. Required on CLJS.
      :read-cond       — :preserve to return ReaderConditional objects instead of
                         evaluating for the current platform.
-     :context         — Clojure ns/require forms the snippet assumes (as for clj->sup)."
-  ([s] (:forms (pipeline/run s)))
+     :context         — Clojure ns/require forms the snippet assumes (as for clj->sup).
+     :comments        — false to leave out the source's ; comments, which are
+                        otherwise attached to the forms (see superficie.comments)."
+  ([s] (sup->forms s nil))
   ([s opts]
-   (:forms (pipeline/run s (cond-> (dissoc opts :context)
-                             (:context opts)
-                             (assoc :ns-context (context-from-source (:context opts))))))))
+   (let [forms (:forms (pipeline/run s (cond-> (dissoc opts :context :comments)
+                                         (:context opts)
+                                         (assoc :ns-context (context-from-source (:context opts))))))]
+     (if (false? (:comments opts))
+       forms
+       (comments/attach forms (comments/scan s))))))
 
 (defn forms->sup
   "Print Clojure forms as a superficie source string (single-line per form)."
@@ -59,191 +65,11 @@
 (defn forms->clj
   "Print Clojure forms as a Clojure source string."
   [forms]
-  (printer/print-clj-string (expander/expand-forms forms)))
+  ;; the vector's meta holds the comments after the last form
+  (printer/print-clj-string (with-meta (vec (expander/expand-forms forms)) (meta forms))))
 
 #?(:clj  (def ^:private eof-sentinel (Object.))
    :cljs (def ^:private eof-sentinel #js {}))
-
-;; ---------------------------------------------------------------------------
-;; Comments of Clojure source
-;;
-;; The Clojure reader discards ; comments. To keep them, the source is scanned
-;; for comments and each one is attached to a form (see attach-comments) as the
-;; :ws metadata the superficie reader gives a form its leading comments, which
-;; the pretty-printer writes above the form. A comment at the end of a line
-;; therefore moves onto its own line above the code it ended.
-;; ---------------------------------------------------------------------------
-
-(defn- scan-comments
-  "The ; comments of Clojure source src, in order, as maps
-   {:line :column :text} (1-based, as the indexing reader counts).
-   Strings, regexes and character literals (\\; \\\") are skipped."
-  [src]
-  (let [n (count src)]
-    (loop [i 0 line 1 col 1 out []]
-      (if (>= i n)
-        out
-        (let [c (nth src i)]
-          (cond
-            (= c \newline) (recur (inc i) (inc line) 1 out)
-
-            ;; string or regex: skip to the closing quote, counting lines
-            (or (= c \") (and (= c \#) (< (inc i) n) (= \" (nth src (inc i)))))
-            (let [j0 (if (= c \#) (+ i 2) (inc i))
-                  [j line col] (loop [j j0 line line col (+ col (- j0 i))]
-                                 (cond (>= j n) [j line col]
-                                       (= \\ (nth src j)) (if (and (< (inc j) n) (= \newline (nth src (inc j))))
-                                                            (recur (+ j 2) (inc line) 1)
-                                                            (recur (+ j 2) line (+ col 2)))
-                                       (= \" (nth src j)) [(inc j) line (inc col)]
-                                       (= \newline (nth src j)) (recur (inc j) (inc line) 1)
-                                       :else (recur (inc j) line (inc col))))]
-              (recur j line col out))
-
-            ;; character literal: \; and \" are not a comment or a string
-            (= c \\) (recur (min n (+ i 2)) line (+ col 2) out)
-
-            (= c \;)
-            (let [end (loop [j i] (if (or (>= j n) (= \newline (nth src j))) j (recur (inc j))))
-                  text (str/trimr (subs src i end))]
-              (recur end line (+ col (- end i)) (conj out {:line line :column col :text text})))
-
-            :else (recur (inc i) line (inc col) out)))))))
-
-(defn- positioned
-  "[line column] of key-l/key-c in form's own metadata, or nil."
-  [form key-l key-c]
-  (when #?(:clj (instance? clojure.lang.IMeta form) :cljs (satisfies? IMeta form))
-    (let [m (meta form)
-          l (get m key-l)
-          c (get m key-c)]
-      (when (and l c) [l c]))))
-
-(defn- wrapper-parts
-  "The parts of a form without a position of its own: a reader-macro
-   wrapper such as (clojure.core/deref x) or a syntax-quote record."
-  [form]
-  (cond
-    (and (record? form) (contains? form :form)) [(:form form)]
-    (and (seq? form) (not (record? form))) form
-    :else nil))
-
-(defn- form-start
-  "[line column] where form starts, or nil. A reader-macro wrapper such as
-   (clojure.core/deref x) starts where its first positioned part does."
-  [form]
-  (or (positioned form :line :column)
-      (some form-start (wrapper-parts form))))
-
-(defn- form-end
-  "[line column] just past the end of form, or nil."
-  [form]
-  (or (positioned form :end-line :end-column)
-      (some form-end (reverse (wrapper-parts form)))))
-
-(defn- pos<
-  [[l1 c1] [l2 c2]]
-  (or (< l1 l2) (and (= l1 l2) (< c1 c2))))
-
-(defn- add-comments
-  "Append comments cs to form's leading :ws comments."
-  [form cs]
-  (if (seq cs)
-    (vary-meta form (fn [m]
-                      (assoc m
-                             :ws (str/join "\n" (cond->> (map :text cs)
-                                                  (:ws m) (cons (:ws m))))
-                             :ws-line (or (:ws-line m) (:line (first cs))))))
-    form))
-
-(defn- comment-kids
-  "The forms inside x a comment can attach to, in reading order, or nil
-   when x is not a collection."
-  [x]
-  (cond
-    (record? x) (when (contains? x :form) [(:form x)])
-    (map? x) (mapcat identity x)
-    (coll? x) (seq x)
-    :else nil))
-
-(defn- with-comment-kids
-  "x rebuilt from kids, as comment-kids returned them."
-  [x kids]
-  (cond
-    (record? x) (assoc x :form (first kids))
-    (seq? x) (with-meta (apply list kids) (meta x))
-    (vector? x) (with-meta (vec kids) (meta x))
-    (map? x) (with-meta (into (empty x) (map vec (partition 2 kids))) (meta x))
-    (set? x) (with-meta (into (empty x) kids) (meta x))))
-
-(defn- can-hold-comments? [x]
-  #?(:clj (instance? clojure.lang.IObj x) :cljs (satisfies? IWithMeta x)))
-
-(defn- add-eol-comments
-  "Attach cs, comments at the end of `line`, to the innermost form of x
-   that ends on that line: the comment is about that code, and the
-   pretty-printer writes it above the nearest enclosing form it lays out."
-  [x line cs]
-  (let [kids (vec (comment-kids x))
-        i (last (keep-indexed (fn [i k]
-                                (when (and (can-hold-comments? k)
-                                           (= line (first (form-end k))))
-                                  i))
-                              kids))]
-    (if i
-      (with-comment-kids x (update kids i add-eol-comments line cs))
-      (add-comments x cs))))
-
-(defn- attach-comments
-  "Attach comments (from scan-comments) to forms, as the :ws metadata
-   (comment lines) and :ws-line (line of the first) the pretty-printer writes
-   above a form. Within each collection, a comment at the end of a line goes
-   onto the innermost form ending on that line (add-eol-comments); any other
-   comment goes onto the next element after it, or, when none follows, onto
-   the collection itself. Elements without a position (numbers, keywords,
-   strings) take none. Comments after the last top-level form go onto the
-   returned vector as :trailing-ws / :trailing-ws-line."
-  [forms comments]
-  (let [pending (volatile! (seq comments))
-        take-before (fn [pos]
-                      (loop [acc []]
-                        (let [c (first @pending)]
-                          (if (and c pos (or (= ::end pos) (pos< [(:line c) (:column c)] pos)))
-                            (do (vswap! pending next) (recur (conj acc c)))
-                            acc))))
-        split-eol (fn [acc prev cs]
-                    ;; cs: comments before the next element; one on the line
-                    ;; where the previous element ends is about that element
-                    (let [prev-end (when prev (form-end (nth acc prev)))
-                          [eol others] (if prev-end
-                                         (split-with #(= (:line %) (first prev-end)) cs)
-                                         [nil cs])]
-                      [(cond-> acc (seq eol) (update prev add-eol-comments (first prev-end) eol))
-                       others]))]
-    (letfn [;; Distribute the comments before `end` (::end: all of them;
-            ;; nil, for a collection without a position: none after its
-            ;; last element) among kids; return [kids' leftover-comments].
-            (walk-kids [kids end]
-              (loop [kids (seq kids) acc [] prev nil carried []]
-                (if kids
-                  (if-let [start (let [k (first kids)]
-                                   (when (can-hold-comments? k) (form-start k)))]
-                    (let [[acc others] (split-eol acc prev (take-before start))
-                          k' (walk (add-comments (first kids) (concat carried others)))]
-                      (recur (next kids) (conj acc k') (count acc) []))
-                    (recur (next kids) (conj acc (walk (first kids))) prev carried))
-                  (let [[acc others] (split-eol acc prev (take-before end))]
-                    [acc (vec (concat carried others))]))))
-            ;; Rebuild x with the comments inside it attached.
-            (walk [x]
-              (if-let [kids (when (can-hold-comments? x) (comment-kids x))]
-                (let [[kids' left] (walk-kids kids (form-end x))]
-                  (add-comments (with-comment-kids x kids') left))
-                x))]
-      (let [[out left] (walk-kids forms ::end)]
-        (cond-> out
-          (seq left) (with-meta {:trailing-ws (str/join "\n" (map :text left))
-                                 :trailing-ws-line (:line (first left))}))))))
 
 #?(:clj
    (defn- normalize-syntax-quote
@@ -357,12 +183,12 @@
            (SupSyntaxQuote / SupUnquote / SupUnquoteSplicing) rather than expanded.
    On CLJS: uses cljs.tools.reader with :read-cond :preserve.
    opts: {:comments true} attaches the source's ; comments to the forms
-         (see attach-comments), for the pretty-printer to keep."
+         (see superficie.comments), for the printers to keep."
   ([clj-src] (clj->forms clj-src nil))
   ([clj-src opts]
    (if (:comments opts)
-     (attach-comments (clj->forms clj-src nil)
-                      (scan-comments #?(:clj clj-src :cljs (tag-js-numbers clj-src))))
+     (comments/attach (clj->forms clj-src nil)
+                      (comments/scan #?(:clj clj-src :cljs (tag-js-numbers clj-src))))
      (read-clj-forms clj-src))))
 
 (defn- read-clj-forms
@@ -516,8 +342,8 @@
           :context \"(require '[raster.core :refer [deftm]])\"} — ns/require forms
    the snippet assumes but does not contain, so a fragment of a file renders
    its library macros as blocks (a deftm, a spin, an a/theorem).
-   :comments false drops the source's ; comments; by default each is kept,
-   written on its own line above the form that follows it."
+   :comments false drops the source's ; comments; by default each is kept
+   where it stood (see superficie.comments)."
   ([clj-src] (clj->sup clj-src nil))
   ([clj-src opts]
    (binding [shapes/*ns-context* (if-let [c (:context opts)]
