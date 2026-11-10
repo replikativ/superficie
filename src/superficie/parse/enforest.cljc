@@ -76,7 +76,7 @@
               :line (:line loc) :col (:col loc) :offset (:offset loc)
               :ws (:ws loc)}]
             (concat (mapcat shrub->tokens (:items node))
-                    [{:type :close-paren :value ")"}])))
+                    [(merge {:type :close-paren :value ")"} (:close loc))])))
 
     (f/shrub-brackets? node)
     (let [loc (:loc node)]
@@ -84,7 +84,7 @@
               :line (:line loc) :col (:col loc) :offset (:offset loc)
               :ws (:ws loc)}]
             (concat (mapcat shrub->tokens (:items node))
-                    [{:type :close-bracket :value "]"}])))
+                    [(merge {:type :close-bracket :value "]"} (:close loc))])))
 
     (f/shrub-braces? node)
     (let [loc (:loc node)]
@@ -92,7 +92,7 @@
               :line (:line loc) :col (:col loc) :offset (:offset loc)
               :ws (:ws loc)}]
             (concat (mapcat shrub->tokens (:items node))
-                    [{:type :close-brace :value "}"}])))
+                    [(merge {:type :close-brace :value "}"} (:close loc))])))
 
     (f/shrub-set? node)
     (let [loc (:loc node)]
@@ -100,7 +100,7 @@
               :line (:line loc) :col (:col loc) :offset (:offset loc)
               :ws (:ws loc)}]
             (concat (mapcat shrub->tokens (:items node))
-                    [{:type :close-brace :value "}"}])))
+                    [(merge {:type :close-brace :value "}"} (:close loc))])))
 
     (f/shrub-anon-fn? node)
     (let [loc (:loc node)]
@@ -108,7 +108,7 @@
               :line (:line loc) :col (:col loc) :offset (:offset loc)
               :ws (:ws loc)}]
             (concat (mapcat shrub->tokens (:items node))
-                    [{:type :close-paren :value ")"}])))
+                    [(merge {:type :close-paren :value ")"} (:close loc))])))
 
     :else
     []))

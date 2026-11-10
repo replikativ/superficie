@@ -553,6 +553,11 @@ user=> square(7)
 (sup/clj->sup "(defn f [x] (+ x 1))")
 ;; => "defn f [x]:\n  x + 1\nend"
 
+;; Comments are kept, in every direction (see "Comments" below)
+(sup/clj->sup "(def x 1) ; one")
+;; => "def x: 1 ; one"
+;; {:comments false} drops them
+
 ;; Superficie string → Clojure source string
 (sup/sup->clj "defn f [x]:\n  x + 1\nend")
 ;; => "(defn f [x] (+ x 1))"
@@ -567,6 +572,25 @@ user=> square(7)
 ;; Pretty-print with width-aware layout
 (sup/pprint-sup (sup/clj->forms my-source) {:width 80})
 ```
+
+### Comments
+
+`;` comments are kept by every conversion: Clojure → superficie
+(`clj->sup`, `renderString`), superficie → superficie (`sup->forms` then
+`pprint-sup`) and superficie → Clojure (`sup->clj`, `parseString`). Each
+comment is placed by where it stood:
+
+- a comment at the end of a line stays at the end of the line where the code
+  it follows is written (`defn power [n x]: ; the meaning`);
+- a comment on its own line stays above the code after it;
+- a comment after the last element of a block or collection stays above its
+  `end` or closer.
+
+When the code a comment belonged to is written on one line with other code,
+the comment goes to the end of that line, or above it. Clojure output, which
+otherwise puts each top-level form on one line, breaks a form with comments
+inside where its source broke. Reading the output back and printing it gives
+the same text.
 
 ### JavaScript / npm
 
@@ -584,6 +608,10 @@ renderString('(defn f [x] (+ x 1))');
 // Superficie → Clojure
 parseString('defn f [x]:\n  x + 1\nend');
 // => '(defn f [x] (+ x 1))'
+
+// Comments are kept; {comments: false} drops them.
+renderString('(defn power [n x] ; the meaning\n  (if (= n 0) 1 (* x (power (dec n) x))))');
+// => 'defn power [n x]: ; the meaning\n  if n = 0:\n    1\n  else:\n    x * power(dec(n), x)\n  end\nend'
 
 // A snippet without its ns form: name the requires it assumes,
 // so library macros render as blocks

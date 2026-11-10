@@ -5,6 +5,7 @@
         break where the original Clojure source broke.
      2. Fill: when no :line metadata, pack items onto lines up to width."
   (:require [superficie.emit.printer :as printer]
+            [superficie.comments :as comments]
             [superficie.forms :as forms]
             [clojure.string :as str]))
 
@@ -138,8 +139,8 @@
       (let [all-lines (if (seq current-line) (conj lines current-line) lines)]
         (str/join (str "\n" inner-indent) all-lines))
       (let [s (first remaining)
-            need-space? (pos? (count current-line))
-            new-col (+ cur-col (if need-space? 1 0) (count s))]
+            need-space? (pos? (comments/width current-line))
+            new-col (+ cur-col (if need-space? 1 0) (comments/width s))]
         (if (and need-space? (> new-col width))
           (recur remaining (conj lines current-line) "" inner-col)
           (recur (rest remaining)
@@ -242,7 +243,7 @@
   "Pretty-print a vector."
   [form col width]
   (let [flat-str (flat form)]
-    (if (or (<= (+ col (count flat-str)) width)
+    (if (or (<= (+ col (comments/width flat-str)) width)
             ;; operator elements need the flat printer's commas
             (some printer/operator-arg? form))
       flat-str
@@ -265,15 +266,15 @@
         last-line (peek (str/split-lines pp-k))
         multi-line? (not= last-line pp-k)
         val-col (if multi-line?
-                  (+ (count last-line) 1)
-                  (+ col (count last-line) 1))]
+                  (+ (comments/width last-line) 1)
+                  (+ col (comments/width last-line) 1))]
     (str pp-k (if (= 'new k) ", " " ") (pp v val-col width))))
 
 (defn- pp-map
   "Pretty-print a map."
   [form col width]
   (let [flat-str (flat form)]
-    (if (or (<= (+ col (count flat-str)) width)
+    (if (or (<= (+ col (comments/width flat-str)) width)
             (some printer/operator-arg? (mapcat identity form)))
       flat-str
       (let [inner-col (inc col)
@@ -291,7 +292,7 @@
   "Pretty-print a set."
   [form col width]
   (let [flat-str (flat form)]
-    (if (or (<= (+ col (count flat-str)) width)
+    (if (or (<= (+ col (comments/width flat-str)) width)
             ;; operator elements need the flat printer's commas
             (some printer/operator-arg? form))
       flat-str
@@ -340,12 +341,12 @@
                             [nil rest1])]
     (when (= 1 (count rest2))
       (let [flat-str (flat form)]
-        (if (<= (+ col (count flat-str)) width)
+        (if (<= (+ col (comments/width flat-str)) width)
           flat-str
           (let [prefix (str (name head) " " (flat name-sym)
                             (when docstring (str " " (printer/print-docstring docstring)))
                             ": ")]
-            (str prefix (pp (first rest2) (+ col (count prefix)) width))))))))
+            (str prefix (pp (first rest2) (+ col (comments/width prefix)) width))))))))
 
 (defn- infix-chain
   "The operands and operators of an infix expression as one chain of
@@ -358,7 +359,7 @@
         a0 (first args)
         s0 (first strs)
         head (if (and (= (printer/infix-prec a0) (printer/infix-prec form))
-                      (not (str/starts-with? s0 "(")))
+                      (not (str/starts-with? (comments/visible s0) "(")))
                (infix-chain a0)
                [[nil s0 a0]])]
     (into head (map (fn [s a] [op s a]) (rest strs) (rest args)))))
@@ -368,8 +369,8 @@
    later lines carry their own indentation."
   [text start-col]
   (if (str/includes? text "\n")
-    (count (peek (str/split text #"\n" -1)))
-    (+ start-col (count text))))
+    (comments/width (peek (str/split text #"\n" -1)))
+    (+ start-col (comments/width text))))
 
 (defn- pp-infix
   "Pretty-print an infix expression that does not fit: break before operators,
@@ -387,7 +388,7 @@
               ;; never split a tighter infix operand (c * u under -) across lines
               breakable? (fn [x a] (and (= x (flat a)) (not (printer/infix-form? a))))
               render (fn [x a c]
-                       (if (or (<= (+ c (count x)) width)
+                       (if (or (<= (+ c (comments/width x)) width)
                                (not (breakable? x a)))
                          x
                          (pp a c width)))
@@ -401,15 +402,15 @@
               (let [piece (str op " " x)
                     here (+ cur 1 (count op) 1)
                     ;; the operand pretty-printed in place, if its first line fits
-                    inline (when (and (breakable? x a) (> (+ here (count x)) width))
+                    inline (when (and (breakable? x a) (> (+ here (comments/width x)) width))
                              (let [r (pp a here width)
                                    first-line (first (str/split r #"\n"))]
                                (when (and (str/includes? r "\n")
-                                          (<= (+ here (count first-line)) width))
+                                          (<= (+ here (comments/width first-line)) width))
                                  r)))]
                 (cond
-                  (<= (+ cur 1 (count piece)) width)
-                  (recur more (str out " " piece) (+ cur 1 (count piece)))
+                  (<= (+ cur 1 (comments/width piece)) width)
+                  (recur more (str out " " piece) (+ cur 1 (comments/width piece)))
 
                   inline
                   (recur more (str out " " op " " inline) (end-col inline here))
@@ -447,7 +448,7 @@
 
       ;; Fits flat — or has an operator-symbol argument, which only the flat
       ;; printer knows how to protect from being read as infix
-      (or (<= (+ col (count flat-str)) width)
+      (or (<= (+ col (comments/width flat-str)) width)
           (some printer/operator-arg? args))
       flat-str
 
@@ -466,8 +467,8 @@
         (cond
           ;; Head-line args fit on the first line
           (and head-args
-               (<= (+ col (count head-str) 1
-                      (count (str/join ", " (map flat-arg head-args))))
+               (<= (+ col (comments/width head-str) 1
+                      (comments/width (str/join ", " (map flat-arg head-args))))
                    width))
           (let [head-args-str (str/join ", " (map flat-arg head-args))
                 first-line (str head-str "(" head-args-str)
@@ -480,9 +481,9 @@
 
           ;; Unknown calls (not in head-line-args): try first arg on head line
           (nil? n-head-args)
-          (let [first-arg-str (pp-arg (first all-args) (+ col (count head-str) 1) width)
+          (let [first-arg-str (pp-arg (first all-args) (+ col (comments/width head-str) 1) width)
                 first-line (first (str/split-lines first-arg-str))
-                first-line-len (+ col (count head-str) 1 (count first-line))]
+                first-line-len (+ col (comments/width head-str) 1 (comments/width first-line))]
             (if (<= first-line-len width)
               ;; First arg (or its first line) fits on head line
               (if (= 1 (count all-args))
@@ -513,27 +514,6 @@
                              pp-arg
                              identity nil ",")
                ")"))))))
-
-;; ---------------------------------------------------------------------------
-;; Comment extraction from :ws metadata
-;; ---------------------------------------------------------------------------
-
-(defn- extract-comments
-  "Extract comment lines from a :ws metadata string.
-   Returns a vector of comment strings (with leading ; intact), or nil."
-  [ws]
-  (when ws
-    (let [lines (str/split-lines ws)]
-      (not-empty (filterv #(re-find #"^\s*;" %) lines)))))
-
-(defn- form-comments
-  "Get comment lines from a form's :ws metadata, or nil."
-  [form]
-  (when (and (some? form)
-             #?(:clj  (instance? clojure.lang.IMeta form)
-                :cljs (satisfies? IMeta form))
-             (meta form))
-    (extract-comments (:ws (meta form)))))
 
 ;; ---------------------------------------------------------------------------
 ;; Main dispatch
@@ -573,16 +553,21 @@
     (pp* form col width)
     (binding [printer/*arrow-ok* false printer/*stmt-ok* false] (pp* form col width))))
 
+(declare pp-layout)
+
 (defn- pp*
   [form col width]
-  (let [comments (form-comments form)
-        indent (indent-str col)
-        meta-info (pp-meta-prefix form)
+  (comments/wrap form (pp-layout form col width)))
+
+(defn- pp-layout
+  "The layout of form at col, without its leading comments."
+  [form col width]
+  (let [meta-info (pp-meta-prefix form)
         formatted (cond
                     ;; Metadata prefix — emit before the form, recurse on stripped
                     meta-info
                     (let [{:keys [prefix stripped]} meta-info
-                          prefix-len (inc (count prefix))
+                          prefix-len (inc (comments/width prefix))
                           inner (pp stripped (+ col prefix-len) width)]
                       (str prefix " " inner))
 
@@ -626,7 +611,7 @@
                     ;; x[i] <- v — the value breaks after the arrow when long
                     (and (call? form) (printer/store-form? form))
                     (let [f (flat form)]
-                      (if (<= (+ col (count f)) width)
+                      (if (<= (+ col (comments/width f)) width)
                         f
                         (let [bare? (binding [printer/*stmt-here* printer/*stmt-ok*
                                               printer/*arrow-here* printer/*arrow-ok*]
@@ -634,11 +619,11 @@
                               [target v] (printer/store-parts form)
                               open (if bare? "" "(")
                               lhs (str open target " <- ")]
-                          (str lhs (pp v (+ col (count lhs)) width) (if bare? "" ")")))))
+                          (str lhs (pp v (+ col (comments/width lhs)) width) (if bare? "" ")")))))
 
                     ;; Infix that does not fit — break before operators
                     (and (call? form) (printer/infix-form? form)
-                         (> (+ col (count (flat form))) width))
+                         (> (+ col (comments/width (flat form))) width))
                     (or (pp-infix form col width) (pp-call-smart form col width))
 
                     ;; Non-block calls — width-aware formatting
@@ -671,30 +656,22 @@
 
                     ;; Everything else ��� flat (primitives, empty list, etc.)
                     :else (flat form))]
-    (if comments
-      ;; First comment line: no indent (caller provides it via join/concat).
-      ;; Subsequent comment lines: indent to current column.
-      ;; All lines: strip original whitespace ��� pprint re-indents.
-      (let [stripped (map str/triml comments)
-            indented (cons (first stripped)
-                           (map #(str indent %) (rest stripped)))]
-        (str (str/join "\n" indented) "\n" indent formatted))
-      formatted)))
+    formatted))
 
 ;; ---------------------------------------------------------------------------
 ;; Public API
 ;; ---------------------------------------------------------------------------
 
 (defn pprint-form
-  "Pretty-print a single Clojure form as sup text.
-   Preserves comments from :ws metadata.
+  "Pretty-print a single Clojure form as sup text, with its comments
+   (see superficie.comments).
    opts: {:width 80}"
   ([form] (pprint-form form nil))
   ([form opts]
    (let [width (or (:width opts) default-width)]
      (binding [printer/*width* width
                printer/*body-form-printer* (fn [f col] (pp f col width))]
-       (pp form 0 width)))))
+       (comments/with-comments form #(pp % 0 width))))))
 
 (defn- form-separator
   "Determine the separator between two consecutive forms based on :line metadata.
@@ -706,7 +683,9 @@
                                :cljs (satisfies? IMeta prev-form))
                             (meta prev-form))
                    (:end-line (meta prev-form)))
-        next-start (elem-line next-form)]
+        ;; a form's comments above it start where it begins
+        next-start (or (:line (first (:before (comments/comments-of next-form))))
+                       (elem-line next-form))]
     (if (and prev-end next-start (= next-start (inc prev-end)))
       "\n"
       "\n\n")))
@@ -718,9 +697,7 @@
    opts: {:width 80}"
   ([forms] (pprint-forms forms nil))
   ([forms opts]
-   (let [trailing-ws (:trailing-ws (meta forms))
-         trailing-comments (when trailing-ws
-                             (extract-comments trailing-ws))
+   (let [trailing (comments/end-lines forms)
          rendered (printer/map-in-ns-context #(pprint-form % opts) forms)
          body (if (<= (count rendered) 1)
                 (str/join rendered)
@@ -728,6 +705,16 @@
                       seps (mapv (fn [[a b]] (form-separator a b)) pairs)]
                   (apply str (first rendered)
                          (mapcat vector seps (rest rendered)))))]
-     (if trailing-comments
-       (str body "\n\n" (str/join "\n" trailing-comments))
-       body))))
+     (cond
+       (not trailing) body
+       (str/blank? body) (str/join "\n" trailing)
+       :else
+       ;; comments right after the last form follow it on the next line
+       (let [last-end (let [f (last forms)]
+                        (when (and (some? f)
+                                   #?(:clj  (instance? clojure.lang.IMeta f)
+                                      :cljs (satisfies? IMeta f)))
+                          (:end-line (meta f))))
+             t-line (:line (first (:end (comments/comments-of forms))))
+             sep (if (and last-end t-line (<= t-line (inc last-end))) "\n" "\n\n")]
+         (str body sep (str/join "\n" trailing)))))))

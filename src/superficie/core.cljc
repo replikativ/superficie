@@ -10,6 +10,7 @@
      superficie.pipeline/run — full ctx->ctx pipeline with intermediate state"
   (:require [superficie.emit.printer :as printer]
             [superficie.shapes :as shapes]
+            [superficie.comments :as comments]
             [superficie.emit.pprint :as pprint]
             [superficie.forms :as forms]
             [superficie.parse.expander :as expander]
@@ -34,12 +35,17 @@
                         to keywords at read time. Required on CLJS.
      :read-cond       — :preserve to return ReaderConditional objects instead of
                         evaluating for the current platform.
-     :context         — Clojure ns/require forms the snippet assumes (as for clj->sup)."
-  ([s] (:forms (pipeline/run s)))
+     :context         — Clojure ns/require forms the snippet assumes (as for clj->sup).
+     :comments        — false to leave out the source's ; comments, which are
+                        otherwise attached to the forms (see superficie.comments)."
+  ([s] (sup->forms s nil))
   ([s opts]
-   (:forms (pipeline/run s (cond-> (dissoc opts :context)
-                             (:context opts)
-                             (assoc :ns-context (context-from-source (:context opts))))))))
+   (let [forms (:forms (pipeline/run s (cond-> (dissoc opts :context :comments)
+                                         (:context opts)
+                                         (assoc :ns-context (context-from-source (:context opts))))))]
+     (if (false? (:comments opts))
+       forms
+       (comments/attach forms (comments/scan s))))))
 
 (defn forms->sup
   "Print Clojure forms as a superficie source string (single-line per form)."
@@ -59,7 +65,8 @@
 (defn forms->clj
   "Print Clojure forms as a Clojure source string."
   [forms]
-  (printer/print-clj-string (expander/expand-forms forms)))
+  ;; the vector's meta holds the comments after the last form
+  (printer/print-clj-string (with-meta (vec (expander/expand-forms forms)) (meta forms))))
 
 #?(:clj  (def ^:private eof-sentinel (Object.))
    :cljs (def ^:private eof-sentinel #js {}))
@@ -168,11 +175,23 @@
      (let [v (resolve/resolve-number raw {})]
        (if (forms/raw? v) v (forms/->SupRaw v raw)))))
 
+(declare read-clj-forms)
+
 (defn clj->forms
   "Read a Clojure source string, return a vector of forms.
    On JVM: uses clojure.tools.reader with syntax-quote preserved as AST nodes
            (SupSyntaxQuote / SupUnquote / SupUnquoteSplicing) rather than expanded.
-   On CLJS: uses cljs.tools.reader with :read-cond :preserve."
+   On CLJS: uses cljs.tools.reader with :read-cond :preserve.
+   opts: {:comments true} attaches the source's ; comments to the forms
+         (see superficie.comments), for the printers to keep."
+  ([clj-src] (clj->forms clj-src nil))
+  ([clj-src opts]
+   (if (:comments opts)
+     (comments/attach (clj->forms clj-src nil)
+                      (comments/scan #?(:clj clj-src :cljs (tag-js-numbers clj-src))))
+     (read-clj-forms clj-src))))
+
+(defn- read-clj-forms
   [clj-src]
   #?(:clj
      (let [read* @#'tr/read*
@@ -322,13 +341,15 @@
    opts: {:width 80
           :context \"(require '[raster.core :refer [deftm]])\"} — ns/require forms
    the snippet assumes but does not contain, so a fragment of a file renders
-   its library macros as blocks (a deftm, a spin, an a/theorem)."
+   its library macros as blocks (a deftm, a spin, an a/theorem).
+   :comments false drops the source's ; comments; by default each is kept
+   where it stood (see superficie.comments)."
   ([clj-src] (clj->sup clj-src nil))
   ([clj-src opts]
    (binding [shapes/*ns-context* (if-let [c (:context opts)]
                                    (context-from-source c)
                                    shapes/*ns-context*)]
-     (pprint-sup (clj->forms clj-src) opts))))
+     (pprint-sup (clj->forms clj-src {:comments (not (false? (:comments opts)))}) opts))))
 
 ;; ---------------------------------------------------------------------------
 ;; Pipeline access

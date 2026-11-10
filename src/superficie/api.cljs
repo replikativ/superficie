@@ -6,8 +6,10 @@
 
 (defn ^:export toSup
   "Convert a Clojure source string to superficie syntax. Returns a string.
-   Optional opts object: {width: 80, context: \"(require '[raster.core :refer [deftm]])\"}
-   — context holds the ns/require forms a snippet assumes but does not contain."
+   Optional opts object: {width: 80, context: \"(require '[raster.core :refer [deftm]])\",
+   comments: false} — context holds the ns/require forms a snippet assumes but
+   does not contain; comments: false drops the source's ; comments (kept by
+   default, each where it stood)."
   ([source] (core/clj->sup source))
   ([source opts]
    (core/clj->sup source (js->clj opts :keywordize-keys true))))
