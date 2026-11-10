@@ -287,7 +287,7 @@
          (not-any? #(= word (name %)) (keys @block-dispatch))
          (not (shapes/shaped-name? word))
          (not (re-find #"\^\S*\s+$" (let [v (comments/visible expr-str)]
-                                       (subs v 0 (- (count v) (count word)))))))))
+                                      (subs v 0 (- (count v) (count word)))))))))
 
 (defn- colon-sep
   "Append the block-opening ':' to a header. Written as `x:` after a plain
@@ -560,30 +560,30 @@
 
 (defn- print-binding-vec*
   [bindings head-str]
-   (if (even? (count bindings))
-     (let [kvs (partition 2 bindings)
-           sep (fn [k v] (if (or (operator-arg? k) (operator-arg? v)) ", " " "))
+  (if (even? (count bindings))
+    (let [kvs (partition 2 bindings)
+          sep (fn [k v] (if (or (operator-arg? k) (operator-arg? v)) ", " " "))
            ;; `[rem mod(x, y)]` would read as infix — hence the comma separator
-           flat-pairs (map (fn [[k v]] (str (print-form k) (sep k v) (print-form v))) kvs)
-           flat (str "[" (str/join ", " flat-pairs) "]")
-           start (+ (count *indent*) (comments/width (or head-str "")) 2)
-           multi-line-value? (str/includes? flat "\n")]
-       (if (and head-str (> (count kvs) 0)
-                (or multi-line-value?
-                    (and *width* (> (count kvs) 1) (> (+ start (comments/width flat)) *width*))))
-         (let [pairs (map (fn [[k v]]
-                            (let [ks (print-form k)
-                                  s (sep k v)
-                                  vcol (+ start (comments/width ks) (comments/width s))]
-                              (str ks s (binding [*indent* (apply str (repeat vcol " "))]
+          flat-pairs (map (fn [[k v]] (str (print-form k) (sep k v) (print-form v))) kvs)
+          flat (str "[" (str/join ", " flat-pairs) "]")
+          start (+ (count *indent*) (comments/width (or head-str "")) 2)
+          multi-line-value? (str/includes? flat "\n")]
+      (if (and head-str (> (count kvs) 0)
+               (or multi-line-value?
+                   (and *width* (> (count kvs) 1) (> (+ start (comments/width flat)) *width*))))
+        (let [pairs (map (fn [[k v]]
+                           (let [ks (print-form k)
+                                 s (sep k v)
+                                 vcol (+ start (comments/width ks) (comments/width s))]
+                             (str ks s (binding [*indent* (apply str (repeat vcol " "))]
                                           ;; width-aware under the pretty-printer
-                                          (if *body-form-printer*
-                                            (*body-form-printer* v vcol)
-                                            (print-form v))))))
-                          kvs)]
-           (str "[" (str/join (str ",\n" (apply str (repeat start " "))) pairs) "]"))
-         flat))
-     (str "[" (join-forms bindings) "]")))
+                                         (if *body-form-printer*
+                                           (*body-form-printer* v vcol)
+                                           (print-form v))))))
+                         kvs)]
+          (str "[" (str/join (str ",\n" (apply str (repeat start " "))) pairs) "]"))
+        flat))
+    (str "[" (join-forms bindings) "]")))
 
 (defn- print-let-block [head args]
   (let [[bindings & body] args]
@@ -718,21 +718,21 @@
                                  (let [kw   (first clause)
                                        items (rest clause)]
                                    (str inner
-                                    (comments/wrap
-                                     clause
-                                     (str (name kw) ":\n"
-                                        (str/join "\n"
-                                                  (map #(str inner "  "
+                                        (comments/wrap
+                                         clause
+                                         (str (name kw) ":\n"
+                                              (str/join "\n"
+                                                        (map #(str inner "  "
                                                           ;; :import list specs (java.pkg Class ...)
                                                           ;; would print as java.pkg(Class ...) which
                                                           ;; the reader misreads as (.pkg java Class ...).
                                                           ;; Emit as [java.pkg Class ...] (vector) instead;
                                                           ;; the reader converts import vectors back to lists.
-                                                             (if (and (= kw :import) (seq? %))
-                                                               (comments/wrap % (str "[" (join-forms %) "]"))
-                                                               (print-form %)))
-                                                       items))
-                                        "\n" inner "end"))))))
+                                                                   (if (and (= kw :import) (seq? %))
+                                                                     (comments/wrap % (str "[" (join-forms %) "]"))
+                                                                     (print-form %)))
+                                                             items))
+                                              "\n" inner "end"))))))
                              clauses)))
             "\n" *indent* "end")))))
 
@@ -1278,79 +1278,79 @@
       (comments/wrap
        (when (symbol? head) head)
        (cond
-        (anon-fn-shorthand? form)
+         (anon-fn-shorthand? form)
         ;; a single parameter is written %, as Clojure writes #(* % %)
-        (let [body (nth form 2)
-              body (if (#{['%1] ['%1 '& '%&]} (second form))
+         (let [body (nth form 2)
+               body (if (#{['%1] ['%1 '& '%&]} (second form))
                      ;; (not a #() literal here: the reader would rewrite the quoted %)
-                     (rename-syms (fn [s] (if (= '%1 s) (symbol "%") s)) body)
-                     body)
-              b (print-form body)]
-          (cond
-            (= *mode* :sup) (str "#(" b ")")
+                      (rename-syms (fn [s] (if (= '%1 s) (symbol "%") s)) body)
+                      body)
+               b (print-form body)]
+           (cond
+             (= *mode* :sup) (str "#(" b ")")
             ;; Clojure's #(…) is itself the body's list: #(inc %), not #((inc %))
-            (and (seq? body)
-                 (let [v (comments/visible b)] (and (str/starts-with? v "(") (str/ends-with? v ")"))))
-            (str "#" b)
+             (and (seq? body)
+                  (let [v (comments/visible b)] (and (str/starts-with? v "(") (str/ends-with? v ")"))))
+             (str "#" b)
             ;; any other body (%, [% 1], 'x, @a) is a value: #(%) would call it
-            :else (str "#(do " b ")")))
+             :else (str "#(do " b ")")))
 
         ;; #(…) from Clojure source: the reader's fn* with p1__N# parameters
-        (and (= *mode* :sup) (clj-anon-fn form))
-        (print-form (clj-anon-fn form))
+         (and (= *mode* :sup) (clj-anon-fn form))
+         (print-form (clj-anon-fn form))
 
         ;; @deref — always use shorthand (both 'x and (quote x) from Clojure source round-trip)
-        (= head 'clojure.core/deref)
-        (str "@" (print-form (second form)))
+         (= head 'clojure.core/deref)
+         (str "@" (print-form (second form)))
 
         ;; 'quote — always use shorthand ('x and (quote x) are semantically identical)
-        (and (= head 'quote) (= 2 (count form)))
-        (str "'" (print-quoted (second form)))
+         (and (= head 'quote) (= 2 (count form)))
+         (str "'" (print-quoted (second form)))
 
         ;; #'var — always use shorthand, but when (var X) is the head of a call
         ;; use (#'X)(args) to prevent #'X(args) being read as (var (X args))
-        (and (= head 'var) (= 2 (count form)))
-        (str "#'" (print-form (second form)))
+         (and (= head 'var) (= 2 (count form)))
+         (str "#'" (print-form (second form)))
 
         ;; (var X) as call head: ((var X) args) → (#'X)(args)
-        (and (= *mode* :sup) (seq? head) (= 'var (first head)) (= 2 (count head))
-             (seq (rest form)))
-        (str "(#'" (print-form (second head)) ")(" (print-args (rest form)) ")")
+         (and (= *mode* :sup) (seq? head) (= 'var (first head)) (= 2 (count head))
+              (seq (rest form)))
+         (str "(#'" (print-form (second head)) ")(" (print-args (rest form)) ")")
 
         ;; sup mode: x[i] <- v for the block's index store function (raster's aset)
-        (store-form? form)
-        (let [[target v] (store-parts form)
-              s (str target " <- " (print-form v))]
-          (if (store-bare?) s (str "(" s ")")))
+         (store-form? form)
+         (let [[target v] (store-parts form)
+               s (str target " <- " (print-form v))]
+           (if (store-bare?) s (str "(" s ")")))
 
         ;; sup mode: x[i, j] for the block's index function (raster's aget)
-        (index-form? form)
-        (let [[_ target & idx] form
-              t (print-form target)]
-          (str (if (or (depth0-space? t)
-                       (and (seq? target) (not (str/ends-with? (comments/visible t) ")"))))
-                 (str "(" t ")")
-                 t)
-               "[" (print-args idx) "]"))
+         (index-form? form)
+         (let [[_ target & idx] form
+               t (print-form target)]
+           (str (if (or (depth0-space? t)
+                        (and (seq? target) (not (str/ends-with? (comments/visible t) ")"))))
+                  (str "(" t ")")
+                  t)
+                "[" (print-args idx) "]"))
 
         ;; sup mode: block forms (defn, if, let, fn, etc.)
-        (and (= *mode* :sup) (symbol? head) (some? (block-kind-for head)))
-        (print-block-form head (rest form))
+         (and (= *mode* :sup) (symbol? head) (some? (block-kind-for head)))
+         (print-block-form head (rest form))
 
         ;; sup mode: Java instance method call — (.method obj args) → obj.method(args)
         ;; Falls back to .method(obj args) when obj ends with a number token (to avoid
         ;; "1.method" being tokenized as a malformed number literal).
-        (and (= *mode* :sup) (symbol? head)
-             (let [n (str head)]
+         (and (= *mode* :sup) (symbol? head)
+              (let [n (str head)]
                ;; .method pattern: starts with ., not .-, length > 1, and second char
                ;; is not another dot — this excludes the .. double-dot chaining operator
-               (and (str/starts-with? n ".") (not (str/starts-with? n ".-")) (> (count n) 1)
-                    (not= \. (nth n 1))))
-             (seq (rest form)))
-        (let [method-name (subs (str head) 1)
-              [obj & method-args] (rest form)
-              obj-str (print-form obj)
-              obj-vis (comments/visible obj-str)
+                (and (str/starts-with? n ".") (not (str/starts-with? n ".-")) (> (count n) 1)
+                     (not= \. (nth n 1))))
+              (seq (rest form)))
+         (let [method-name (subs (str head) 1)
+               [obj & method-args] (rest form)
+               obj-str (print-form obj)
+               obj-vis (comments/visible obj-str)
               ;; Safe to use obj.method() notation only when obj-str is a simple expression:
               ;; - not ending with a number literal (would look like "1.method")
               ;; - not namespace-qualified (contains '/')
@@ -1358,67 +1358,67 @@
               ;; - no spaces (complex expressions like "or(a, b)" are ambiguous in arg position:
               ;;   "f(or(a, b).method())" would be parsed as "f(or(a, (.method b)))")
               ;; - not a boolean/nil literal: "true.setDaemon()" reads "true" as Symbol, not Boolean
-              last-word (last (str/split (str/trim obj-vis) #"\s+"))
-              safe? (and (not *dotted-calls*) ; obj.m(x) would read as the call (obj.m x)
-                         (not (re-matches #"-?[0-9].*" last-word))
-                         (not (str/includes? obj-vis "/"))
-                         (not (re-matches #"[~@'].*" obj-vis))
-                         (not (str/includes? obj-vis " "))
-                         (not (str/includes? obj-vis ".-"))
-                         (not (#{"true" "false" "nil"} obj-vis)))]
-          (if safe?
-            (str obj-str "." method-name "(" (print-args method-args) ")")
-            (str "." method-name "(" obj-str (when (seq method-args) (str ", " (print-args method-args))) ")")))
+               last-word (last (str/split (str/trim obj-vis) #"\s+"))
+               safe? (and (not *dotted-calls*) ; obj.m(x) would read as the call (obj.m x)
+                          (not (re-matches #"-?[0-9].*" last-word))
+                          (not (str/includes? obj-vis "/"))
+                          (not (re-matches #"[~@'].*" obj-vis))
+                          (not (str/includes? obj-vis " "))
+                          (not (str/includes? obj-vis ".-"))
+                          (not (#{"true" "false" "nil"} obj-vis)))]
+           (if safe?
+             (str obj-str "." method-name "(" (print-args method-args) ")")
+             (str "." method-name "(" obj-str (when (seq method-args) (str ", " (print-args method-args))) ")")))
 
         ;; sup mode: Java field access — (.-field obj) → obj.-field
         ;; Same safety check for number-ending obj expressions.
-        (and (= *mode* :sup) (symbol? head)
-             (str/starts-with? (str head) ".-") (= 1 (count (rest form))))
-        (let [field-sym-str (str head)          ;; e.g. ".-uuid"
-              field-name    (subs field-sym-str 1) ;; e.g. "-uuid" (dot removed for safe concat)
-              obj-str (print-form (second form))
-              obj-vis (comments/visible obj-str)
-              last-word (last (str/split (str/trim obj-vis) #"\s+"))
-              safe? (and (not (re-matches #"-?[0-9].*" last-word))
-                         (not (str/includes? obj-vis "/"))
-                         (not (re-matches #"[~@'].*" obj-vis))
-                         (not (str/includes? obj-vis " "))
-                         (not (str/includes? obj-vis ".-")))]
-          (if safe?
-            (str obj-str "." field-name)
+         (and (= *mode* :sup) (symbol? head)
+              (str/starts-with? (str head) ".-") (= 1 (count (rest form))))
+         (let [field-sym-str (str head)          ;; e.g. ".-uuid"
+               field-name    (subs field-sym-str 1) ;; e.g. "-uuid" (dot removed for safe concat)
+               obj-str (print-form (second form))
+               obj-vis (comments/visible obj-str)
+               last-word (last (str/split (str/trim obj-vis) #"\s+"))
+               safe? (and (not (re-matches #"-?[0-9].*" last-word))
+                          (not (str/includes? obj-vis "/"))
+                          (not (re-matches #"[~@'].*" obj-vis))
+                          (not (str/includes? obj-vis " "))
+                          (not (str/includes? obj-vis ".-")))]
+           (if safe?
+             (str obj-str "." field-name)
             ;; Unsafe: use function-call notation .-field(obj) which round-trips cleanly
-            (str field-sym-str "(" obj-str ")")))
+             (str field-sym-str "(" obj-str ")")))
 
         ;; sup mode: Java constructor — (ClassName. args) → new ClassName(args)
         ;; Excludes .. (double-dot chaining operator) which also ends with "."
-        (and (= *mode* :sup) (symbol? head)
-             (let [n (str head)]
-               (and (str/ends-with? n ".") (not= n ".")
+         (and (= *mode* :sup) (symbol? head)
+              (let [n (str head)]
+                (and (str/ends-with? n ".") (not= n ".")
                     ;; Prefix (class name) must not start with "." — excludes ".."
-                    (not (str/starts-with? (subs n 0 (dec (count n))) ".")))))
-        (let [class-name (subs (str head) 0 (dec (count (str head))))]
-          (str "new " class-name "(" (print-args (rest form)) ")"))
+                     (not (str/starts-with? (subs n 0 (dec (count n))) ".")))))
+         (let [class-name (subs (str head) 0 (dec (count (str head))))]
+           (str "new " class-name "(" (print-args (rest form)) ")"))
 
         ;; sup mode: (new ClassName args...) → new ClassName(args...)
-        (and (= *mode* :sup) (= head 'new) (seq (rest form)) (symbol? (second form)))
-        (let [class-name (second form)]
-          (str "new " class-name "(" (print-args (drop 2 form)) ")"))
+         (and (= *mode* :sup) (= head 'new) (seq (rest form)) (symbol? (second form)))
+         (let [class-name (second form)]
+           (str "new " class-name "(" (print-args (drop 2 form)) ")"))
 
         ;; sup mode: infix operators — unified via infix-entry
         ;; variadic ops emit for 2+ args; non-variadic only for exactly 2 args
-        (and (= *mode* :sup)
-             (let [e (infix-entry head)
-                   n (count (rest form))]
-               (and e (if (:variadic e) (>= n 2) (= n 2)))))
-        (let [e      (infix-entry head)
-              op-str (or (:str e) (name head))]
-          (print-infix e op-str (rest form) head))
+         (and (= *mode* :sup)
+              (let [e (infix-entry head)
+                    n (count (rest form))]
+                (and e (if (:variadic e) (>= n 2) (= n 2)))))
+         (let [e      (infix-entry head)
+               op-str (or (:str e) (name head))]
+           (print-infix e op-str (rest form) head))
 
         ;; call: sup emits head(args...), clj emits (head args...)
-        :else
-        (cond
-          (= *mode* :clj)
-          (str "(" (print-form head) (when (seq (rest form)) (str " " (print-args (rest form)))) ")")
+         :else
+         (cond
+           (= *mode* :clj)
+           (str "(" (print-form head) (when (seq (rest form)) (str " " (print-args (rest form)))) ")")
 
           ;; Deref/unquote-then-call: ((deref x) args) → (@x)(args)
           ;;                         ((~x) args) → (~x)(args)
@@ -1427,13 +1427,13 @@
           ;; (head)(args) works: parse-call-chain sees adjacent ( after the group.
           ;; Dotted-symbol call head: (clojure.lang.MapEntry k) → (clojure.lang.MapEntry)(k)
           ;; Without parens, the reader's obj.method() rule would split on the last dot.
-          (wrapped-call-head? head)
-          (str (call-head-str head) "(" (print-args (rest form)) ")")
+           (wrapped-call-head? head)
+           (str (call-head-str head) "(" (print-args (rest form)) ")")
 
-          :else
+           :else
           ;; Arguments are comma-separated; an operator preceded by a comma is
           ;; never infix, so f(a, +, b) keeps + as the symbol it is.
-          (str (print-form head) "(" (print-args (rest form)) ")")))))
+           (str (print-form head) "(" (print-args (rest form)) ")")))))
 
     ;; syntax-quote / unquote / unquote-splicing AST nodes
     ;; Must be before map? because these are defrecords (satisfy map?)
