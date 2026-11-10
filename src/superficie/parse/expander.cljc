@@ -38,21 +38,38 @@
 
 (declare expand-sq)
 
+(defn- carry
+  "result, the expansion of form, with form's comments (superficie.comments)."
+  [form result]
+  (if-let [cs (and #?(:clj (instance? clojure.lang.IMeta form) :cljs (satisfies? IMeta form))
+                   (:sup/comments (meta form)))]
+    (if #?(:clj (instance? clojure.lang.IObj result) :cljs (satisfies? IWithMeta result))
+      (vary-meta result assoc :sup/comments cs)
+      result)
+    result))
+
 (defn- expand-items
   "Expand a sequence of items for use inside concat. Each item becomes either
    a splice or a (list ...) wrapper. Must be eager (mapv) so that auto-gensym
    is called while *gsenv* is still bound."
   [items opts loc]
   (mapv (fn [item]
-          (cond
-            (forms/unquote-splicing? item) (:form item)
-            (forms/unquote? item)          (list 'clojure.core/list (:form item))
-            :else                          (list 'clojure.core/list (expand-sq item opts loc))))
+          (carry item
+                 (cond
+                   (forms/unquote-splicing? item) (:form item)
+                   (forms/unquote? item)          (list 'clojure.core/list (:form item))
+                   :else                          (list 'clojure.core/list (expand-sq item opts loc)))))
         items))
+
+(declare expand-sq*)
 
 (defn expand-sq
   "Expand a form inside syntax-quote into a Clojure expression that, when
    evaluated, produces the quoted result. Mirrors SyntaxQuoteReader semantics."
+  [form opts loc]
+  (carry form (expand-sq* form opts loc)))
+
+(defn- expand-sq*
   [form opts loc]
   (cond
     (forms/unquote? form)
@@ -111,9 +128,10 @@
      (:value form)
 
      (forms/syntax-quote? form)
-     (binding [*gsenv* (volatile! {})]
-       (expand-sq (:form form) opts
-                  (select-keys (meta form) [:line :col])))
+     (carry form
+            (binding [*gsenv* (volatile! {})]
+              (expand-sq (:form form) opts
+                         (select-keys (meta form) [:line :col]))))
 
      ;; Unquote/unquote-splicing outside syntax-quote: walk the inner form
      ;; (they'll be caught as errors if they end up in expand-sq)

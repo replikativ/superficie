@@ -21,7 +21,7 @@
               (core/clj->sup "(f 1e3 2.50 0xFF 1/2 2N 1.5M 2r101 017 12345678901234567890)")))
        (is (= "defmacro m [x]:\n  `*(~x, 4.0)\nend" (core/clj->sup "(defmacro m [x] `(* ~x 4.0))")))
        (testing "and strings, comments, characters and keywords are untouched"
-         (is (= "; 4.0\nf(\"4.0\", \\a, :1.5, a1.0)" (core/clj->sup "(f \"4.0\" \\a :1.5 a1.0) ; 4.0")))))
+         (is (= "f(\"4.0\", \\a, :1.5, a1.0) ; 4.0" (core/clj->sup "(f \"4.0\" \\a :1.5 a1.0) ; 4.0")))))
      (testing "superficie source: hex, ratio, N and M read as their JS value"
        (let [[[_ & args]] (core/sup->forms "f(4.0, 0xFF, 1/2, 2N, 1.5M, 1.5)")]
          (is (= [4 255 0.5 2 1.5] (map #(if (forms/raw? %) (forms/raw-value %) %) (butlast args))))

@@ -3,6 +3,7 @@
    Mode :sup (default) emits head(args...) call syntax.
    Mode :clj emits (head args...) S-expression syntax with reader sugar."
   (:require [clojure.string :as str]
+            [superficie.comments :as comments]
             [superficie.forms :as forms]
             [superficie.operators :as ops]
             [superficie.shapes :as shapes]))
@@ -53,17 +54,6 @@
           (with-meta (list 'fn (mapv #(get rename % %) params)
                            (rename-syms #(get rename % %) (nth form 2)))
             {:sup/sugar true}))))))
-
-;; ---------------------------------------------------------------------------
-;; Comments
-;; ---------------------------------------------------------------------------
-
-(def ^:dynamic *comments-left-out*
-  "Bound by the pretty-printer to (fn [forms render]) => [comment-lines s]:
-   s is (render), with the forms' leading comments left to the caller, and
-   comment-lines are the comments in forms that s does not contain. nil when
-   comments are not kept."
-  nil)
 
 ;; ---------------------------------------------------------------------------
 ;; Mode — :sup or :clj
@@ -287,7 +277,7 @@
    behind a sigil (' @ # ~ ^) or metadata."
   [expr-str]
   (when-let [[_ _ word] (re-find #"(^|[\s(\[{,])([A-Za-z_*!?<>=+$%&|][A-Za-z0-9_*!?<>=+$%&|'#/-]*|-[A-Za-z_*!?<>=+$%&|][A-Za-z0-9_*!?<>=+$%&|'#/-]*)$"
-                                 expr-str)]
+                                 (comments/visible expr-str))]
     (and (not (str/includes? word "."))
          (not (str/ends-with? word "/"))
          (not (contains? reserved-words word))
@@ -296,19 +286,21 @@
          (nil? (block-kind-for (symbol word)))
          (not-any? #(= word (name %)) (keys @block-dispatch))
          (not (shapes/shaped-name? word))
-         (not (re-find #"\^\S*\s+$" (subs expr-str 0 (- (count expr-str) (count word))))))))
+         (not (re-find #"\^\S*\s+$" (let [v (comments/visible expr-str)]
+                                       (subs v 0 (- (count v) (count word)))))))))
 
 (defn- colon-sep
   "Append the block-opening ':' to a header. Written as `x:` after a plain
    symbol, otherwise separated by a space when it would fuse with the last
    token (e.g. `n > 0 :`, `:- :`)."
   [expr-str]
-  (cond
-    (fusable-trailing-symbol? expr-str) (str expr-str ":")
-    ;; a plain decimal number reads as itself before ':' (`if i <= 1:`)
-    (re-find #"(?:^|[\s(\[,])[-+]?\d+(?:\.\d+)?$" expr-str) (str expr-str ":")
-    (re-find #"[a-zA-Z0-9_!\?\*\-]$" expr-str) (str expr-str " :")
-    :else (str expr-str ":")))
+  (let [v (comments/visible expr-str)]
+    (cond
+      (fusable-trailing-symbol? expr-str) (str expr-str ":")
+      ;; a plain decimal number reads as itself before ':' (`if i <= 1:`)
+      (re-find #"(?:^|[\s(\[,])[-+]?\d+(?:\.\d+)?$" v) (str expr-str ":")
+      (re-find #"[a-zA-Z0-9_!\?\*\-]$" v) (str expr-str " :")
+      :else (str expr-str ":"))))
 
 (defn- infix-print-arg
   "Print an infix operand; parenthesize when its op has lower precedence than threshold."
@@ -375,24 +367,34 @@
                               (or (contains? forms/reserved-statement-words (name %))
                                   (shapes/shaped-name? (name %))))
                         (take-nth 2 (rest bs)))))
-       (not (str/includes? (or (:ws (meta form)) "") ";"))))
+       ;; its end comments go above its `end`
+       (empty? (:end (comments/comments-of form)))))
 
 (defn- body-items
   "A body's forms as printed lines: a let in tail position becomes its bindings
    as [::bind name value] items followed by its own body, flattened the same
    way. The reader makes each run of `:=` statements one let, so a let whose
-   body is a single let keeps that inner one as a block."
+   body is a single let keeps that inner one as a block. Each line is
+   {:item x :open [let ...] :close [let ...]}: the flattened lets that start
+   and end on it, whose comments it carries."
   [forms]
   (let [forms (vec forms)
-        tail (peek forms)]
+        tail (peek forms)
+        plain (fn [f] {:item f})]
     (if (and tail (statement-let? tail))
-      (let [[_ bs & body] tail]
-        (concat (pop forms)
-                (map (fn [[k v]] [::bind k v]) (partition 2 bs))
-                (if (and (= 1 (count body)) (statement-let? (first body)))
-                  body
-                  (body-items body))))
-      forms)))
+      (let [[_ bs & body] tail
+            seg (vec (concat (map (fn [[k v]] {:item [::bind k v]}) (partition 2 bs))
+                             (if (and (= 1 (count body)) (statement-let? (first body)))
+                               (map plain body)
+                               (body-items body))))
+            ;; the let's comments and its binding vector's go on the lines
+            ;; the bindings start and end on
+            seg (-> seg
+                    (update 0 update :open (fnil into []) [tail bs])
+                    (update (dec (quot (count bs) 2)) update :close (fnil conj []) bs)
+                    (update (dec (count seg)) update :close (fnil conj []) tail))]
+        (concat (map plain (pop forms)) seg))
+      (map plain forms))))
 
 (defn- print-body
   "Print forms as indented body lines (each on its own line)."
@@ -403,30 +405,26 @@
                              (*body-form-printer* f col)
                              (print-form f))))]
     (binding [*indent* inner]
-      (str/join "\n" (map (fn [item]
-                            (if (and (vector? item) (= ::bind (first item)))
-                              (let [[_ k v] item
-                                    lhs (str (print-form k) " := ")
-                                    render #(binding [*stmt-ok* false]
-                                              (if *body-form-printer*
-                                                (*body-form-printer* v (+ (count inner) (count lhs)))
-                                                (print-form v)))
-                                    ;; the comments of x and v go above `x := v`
-                                    ;; (where the reader reads them onto x)
-                                    [comments rhs] (if *comments-left-out*
-                                                     (*comments-left-out* [k v] render)
-                                                     [nil (render)])]
-                                (str (apply str (map #(str inner (str/triml %) "\n") comments))
-                                     inner lhs rhs))
-                              (let [t (line item (count inner))]
-                                (str inner
+      (str/join "\n" (map (fn [{:keys [item open close]}]
+                            (let [text
+                                  (if (and (vector? item) (= ::bind (first item)))
+                                    (let [[_ k v] item
+                                          lhs (str (print-form k) " := ")]
+                                      (str lhs (binding [*stmt-ok* false]
+                                                 (if *body-form-printer*
+                                                   (*body-form-printer* v (+ (count inner) (comments/width lhs)))
+                                                   (print-form v)))))
+                                    (let [t (line item (count inner))]
                                       ;; `end - start` would close the block: a
                                       ;; statement may not start with a terminator word
-                                     (if (and (= *mode* :sup)
-                                              (re-find #"^(end|else|catch|finally)(?![\w\-?!*'<>=/.:$#%&])" t)
-                                              (not (contains? block-terminator-syms item)))
-                                       (str "(" t ")")
-                                       t)))))
+                                      (if (and (= *mode* :sup)
+                                               (re-find #"^(end|else|catch|finally)(?![\w\-?!*'<>=/.:$#%&])" (comments/visible t))
+                                               (not (contains? block-terminator-syms item)))
+                                        (str "(" t ")")
+                                        t)))]
+                              (str inner
+                                   (reduce #(comments/wrap-start %2 %1) text (reverse open))
+                                   (apply str (map #(comments/wrap-end % "") close)))))
                           (body-items forms))))))
 
 (defn- print-defn-block [head args]
@@ -453,8 +451,8 @@
             multi-doc? (and docstring
                             (or (str/includes? docstring "\n")
                                 (and *width*
-                                     (> (+ (count *indent*) (count head-str) (count (print-form name-sym))
-                                           (count (print-docstring docstring)) (count (print-form params)) 4)
+                                     (> (+ (count *indent*) (comments/width head-str) (comments/width (print-form name-sym))
+                                           (comments/width (print-docstring docstring)) (comments/width (print-form params)) 4)
                                         *width*))))
             cont (str "\n" *indent* "    ")
             ;; a multi-line docstring and the rest of the header go on hanging-indented
@@ -488,8 +486,8 @@
         (let [b (print-form body)]
           (when-not (str/includes? b "\n")
             (str (if (= 1 (count params))
-                   (str (first params))
-                   (str "(" (str/join ", " params) ")"))
+                   (comments/wrap (first params) (str (first params)))
+                   (str "(" (str/join ", " (map #(comments/wrap % (str %)) params)) ")"))
                  " -> " b)))))))
 
 (defn- print-fn-block [head args]
@@ -501,7 +499,7 @@
         [name-sym rest2] (if (symbol? maybe-name)
                            [maybe-name rest1]
                            [nil (cons maybe-name rest1)])
-        prefix (if name-sym (str head-str " " name-sym) head-str)]
+        prefix (if name-sym (str head-str " " (comments/wrap name-sym (str name-sym))) head-str)]
     (cond
       (and (seq rest2) (seq? (first rest2)) (vector? (first (first rest2))))
       ;; multi-arity: fall back to call syntax for roundtrippability
@@ -547,6 +545,8 @@
          (print-body (vec body)) "\n"
          *indent* "end")))
 
+(declare print-binding-vec*)
+
 (defn- print-binding-vec
   "Print a binding vector with a comma between each name-value pair.
    [x 1 y 2] → [x 1, y 2]    [x xs :when p y ys] → [x xs, :when p, y ys]
@@ -556,21 +556,25 @@
    indented from the column where the value starts."
   ([bindings] (print-binding-vec bindings nil))
   ([bindings head-str]
+   (comments/wrap bindings (print-binding-vec* bindings head-str))))
+
+(defn- print-binding-vec*
+  [bindings head-str]
    (if (even? (count bindings))
      (let [kvs (partition 2 bindings)
            sep (fn [k v] (if (or (operator-arg? k) (operator-arg? v)) ", " " "))
            ;; `[rem mod(x, y)]` would read as infix — hence the comma separator
            flat-pairs (map (fn [[k v]] (str (print-form k) (sep k v) (print-form v))) kvs)
            flat (str "[" (str/join ", " flat-pairs) "]")
-           start (+ (count *indent*) (count (or head-str "")) 2)
+           start (+ (count *indent*) (comments/width (or head-str "")) 2)
            multi-line-value? (str/includes? flat "\n")]
        (if (and head-str (> (count kvs) 0)
                 (or multi-line-value?
-                    (and *width* (> (count kvs) 1) (> (+ start (count flat)) *width*))))
+                    (and *width* (> (count kvs) 1) (> (+ start (comments/width flat)) *width*))))
          (let [pairs (map (fn [[k v]]
                             (let [ks (print-form k)
                                   s (sep k v)
-                                  vcol (+ start (count ks) (count s))]
+                                  vcol (+ start (comments/width ks) (comments/width s))]
                               (str ks s (binding [*indent* (apply str (repeat vcol " "))]
                                           ;; width-aware under the pretty-printer
                                           (if *body-form-printer*
@@ -579,7 +583,7 @@
                           kvs)]
            (str "[" (str/join (str ",\n" (apply str (repeat start " "))) pairs) "]"))
          flat))
-     (str "[" (join-forms bindings) "]"))))
+     (str "[" (join-forms bindings) "]")))
 
 (defn- print-let-block [head args]
   (let [[bindings & body] args]
@@ -616,10 +620,10 @@
   [test]
   (cond
     (and (seq? test) (seq test))
-    (str "'" (binding [*mode* :clj]
-               (str "(" (join-forms test) ")")))
+    (comments/wrap test (str "'" (binding [*mode* :clj]
+                                   (str "(" (join-forms test) ")"))))
     (and (symbol? test) (some? (block-kind-for test)))
-    (str "'" test)
+    (comments/wrap test (str "'" test))
     :else
     (print-form test)))
 
@@ -650,12 +654,16 @@
                            (case (first clause)
                              catch
                              (let [[_ ex-type binding & handler] clause]
-                               (str *indent* "catch [" (print-form ex-type) " " (print-form binding) "]:\n"
-                                    (print-body (vec handler))))
+                               (str *indent*
+                                    (comments/wrap clause
+                                                   (str "catch [" (print-form ex-type) " " (print-form binding) "]:\n"
+                                                        (print-body (vec handler))))))
                              finally
                              (let [[_ & finally-body] clause]
-                               (str *indent* "finally:\n"
-                                    (print-body (vec finally-body))))
+                               (str *indent*
+                                    (comments/wrap clause
+                                                   (str "finally:\n"
+                                                        (print-body (vec finally-body))))))
                              nil))
                          clauses))
          "\n" *indent* "end")))
@@ -709,7 +717,10 @@
                                  (str inner (print-form clause))
                                  (let [kw   (first clause)
                                        items (rest clause)]
-                                   (str inner (name kw) ":\n"
+                                   (str inner
+                                    (comments/wrap
+                                     clause
+                                     (str (name kw) ":\n"
                                         (str/join "\n"
                                                   (map #(str inner "  "
                                                           ;; :import list specs (java.pkg Class ...)
@@ -718,10 +729,10 @@
                                                           ;; Emit as [java.pkg Class ...] (vector) instead;
                                                           ;; the reader converts import vectors back to lists.
                                                              (if (and (= kw :import) (seq? %))
-                                                               (str "[" (join-forms %) "]")
+                                                               (comments/wrap % (str "[" (join-forms %) "]"))
                                                                (print-form %)))
                                                        items))
-                                        "\n" inner "end"))))
+                                        "\n" inner "end"))))))
                              clauses)))
             "\n" *indent* "end")))))
 
@@ -745,8 +756,8 @@
       ;; pattern-form match (ansatz): each clause [pattern body] as an arm
       (str (clojure.core/name head) " " (colon-sep (print-form expr)) "\n"
            (binding [*indent* inner]
-             (str/join "\n" (map (fn [[pat body]]
-                                   (print-arm inner "| " (print-form pat) body))
+             (str/join "\n" (map (fn [[pat body :as clause]]
+                                   (comments/wrap clause (print-arm inner "| " (print-form pat) body)))
                                  clauses)))
            "\n" *indent* "end")
       (if *match-arms*
@@ -797,7 +808,7 @@
                      (map (fn [m]
                             (if (forms/sup-reader-conditional? m)
                               (str inner (print-form m))
-                              (str inner (print-defprotocol-method-sig m))))
+                              (str inner (comments/wrap m (print-defprotocol-method-sig m)))))
                           methods)))
          "\n" *indent* "end")))
 
@@ -805,9 +816,10 @@
   ;; Called with *indent* already set to the method indentation level by the caller.
   ;; print-body adds one more level (2 spaces) for the body lines.
   (let [[name-sym params & body] method]
-    (str (print-form name-sym) " " (print-form params) ":\n"
-         (print-body (vec body)) "\n"
-         *indent* "end")))
+    (comments/wrap method
+                   (str (print-form name-sym) " " (print-form params) ":\n"
+                        (print-body (vec body)) "\n"
+                        *indent* "end"))))
 
 (defn- print-protocol-impl-items [items]
   (let [inner (str *indent* "  ")]
@@ -889,7 +901,7 @@
   [v col]
   (let [flat (print-form v)
         groups (param-groups v)]
-    (if (and *width* (> (count groups) 1) (> (+ col (count flat)) *width*)
+    (if (and *width* (> (count groups) 1) (> (+ col (comments/width flat)) *width*)
              ;; a user ^meta prefix would precede '[' — keep those flat
              (empty? (forms/strip-internal-meta (meta v))))
       ;; align after '[' unless that is past mid-line (e.g. after a docstring);
@@ -988,7 +1000,7 @@
   [inner s]
   (and (seq? inner) (seq inner)
        (or (not (symbol? (first inner)))   ; a data list: '(1 2 3)
-           (str/starts-with? s "(")
+           (str/starts-with? (comments/visible s) "(")
            (depth0-space? s))))
 
 (defn print-quoted
@@ -1045,16 +1057,16 @@
                           (let [s (if (vector? x) (print-header-vector x col) (print-header-item x))
                                 last-line (peek (str/split s #"\n" -1))
                                 col' (if (str/includes? s "\n")
-                                       (+ (count last-line) 1)
-                                       (+ col (count s) 1))]
+                                       (+ (comments/width last-line) 1)
+                                       (+ col (comments/width s) 1))]
                             (recur (rest items) col' (conj out s)))
                           out)))
         header-strs (binding [*index-sym* nil]
-                      (print-items header (+ (count *indent*) (count head-str) 1)))
+                      (print-items header (+ (count *indent*) (comments/width head-str) 1)))
         ;; a multi-line docstring goes on its own continuation line, with the rest
         ;; of the header on the next one — Python's hanging indent, deeper than the body
-        flat-len (+ (count *indent*) (count head-str) 1
-                    (count (str/join " " header-strs)))
+        flat-len (+ (count *indent*) (comments/width head-str) 1
+                    (comments/width (str/join " " header-strs)))
         doc-idx (first (keep-indexed (fn [i x]
                                        (when (and (string? x)
                                                   (or (str/includes? x "\n")
@@ -1122,6 +1134,67 @@
 
 (declare print-form*)
 
+(declare anon-fn-shorthand?)
+
+(defn- clj-broken?
+  "In clj mode, does form print as lines? A plain list, vector, map or set
+   with comments inside: a comment needs a line of its own above its form, or
+   the end of the line where its form ends."
+  [form]
+  (and (= *mode* :clj)
+       (coll? form)
+       (not (record? form))
+       (not (:sup/ns (meta form)))
+       (not (and (seq? form)
+                 (or (empty? form)
+                     (contains? '#{quote clojure.core/deref var} (first form))
+                     (anon-fn-shorthand? form))))
+       (or (seq (:end (comments/comments-of form)))
+           (some comments/has-comments? (if (map? form) (mapcat identity form) form)))))
+
+(defn- print-clj-broken
+  "A collection as Clojure lines: an element goes on a new line when it has
+   comments above it, when the source started it on a later line than the one
+   before ended, or after an element written on several lines. Continuation
+   lines indent 2 in a list, 1 in a vector, map or set."
+  [form]
+  (let [[open close indent] (cond (seq? form) ["(" ")" 2]
+                                  (vector? form) ["[" "]" 1]
+                                  (map? form) ["{" "}" 1]
+                                  :else ["#{" "}" 1])
+        units (if (map? form)
+                (map (fn [[k v]] {:first k :last v
+                                  :text (str (print-form k) " " (print-form v))})
+                     form)
+                (map (fn [x] {:first x :last x :text (print-form x)})
+                     (or (:sup/order (meta form)) form)))
+        ;; entries of a map are comma-separated, as on one line
+        sep (if (map? form) "," "")
+        pad (apply str (repeat indent " "))
+        shift (fn [text col] (str/replace text "\n" (str "\n" (apply str (repeat col " ")))))
+        [lines _ _]
+        (reduce (fn [[lines prev-end prev-multi?] {:keys [first last text]}]
+                  (let [start (comments/start-line first)
+                        new-line? (and (seq lines)
+                                       (or (seq (:before (comments/comments-of first)))
+                                           prev-multi?
+                                           (and start prev-end (> start prev-end))))
+                        multi? (str/includes? text "\n")
+                        lines (cond
+                                (empty? lines) [(str open (shift text (count open)))]
+                                new-line? (conj (conj (pop lines) (str (peek lines) sep))
+                                                (str pad (shift text indent)))
+                                :else (let [cur (str (peek lines) sep)
+                                            col (inc (comments/width cur))]
+                                        (conj (pop lines) (str cur " " (shift text col)))))]
+                    [lines (or (comments/end-line last) prev-end) multi?]))
+                [[] nil false]
+                units)]
+    ;; comments after the last element go above the closer, on its own line
+    (str (str/join "\n" (if (seq lines) lines [open]))
+         (when (seq (:end (comments/comments-of form))) "\n")
+         close)))
+
 (defn print-form
   "Print a single Clojure form as sup text."
   [form]
@@ -1129,7 +1202,7 @@
             *arrow-ok* false
             *stmt-here* *stmt-ok*
             *stmt-ok* false]
-    (print-form* form)))
+    (comments/wrap form (print-form* form))))
 
 (defn- print-form*
   [form]
@@ -1172,6 +1245,10 @@
         (let [m (forms/strip-internal-meta (meta form))]
           (str (emit-one m) " " (print-stripped)))))
 
+    ;; clj mode: a collection with comments inside breaks into lines
+    (clj-broken? form)
+    (print-clj-broken form)
+
     ;; raw value wrapper — emit original source text
     (forms/raw? form) (:raw form)
 
@@ -1194,10 +1271,13 @@
     (and (= *mode* :sup) (seq? form) (seq form) (contains? #{nil true false} (first form)))
     (str (pr-str (first form)) "(" (print-args (rest form)) ")")
 
-    ;; sequences — calls and reader sugar
+    ;; sequences — calls and reader sugar (several write the head as text, so
+    ;; the call carries the head's comments)
     (seq? form)
     (let [head (first form)]
-      (cond
+      (comments/wrap
+       (when (symbol? head) head)
+       (cond
         (anon-fn-shorthand? form)
         ;; a single parameter is written %, as Clojure writes #(* % %)
         (let [body (nth form 2)
@@ -1209,7 +1289,9 @@
           (cond
             (= *mode* :sup) (str "#(" b ")")
             ;; Clojure's #(…) is itself the body's list: #(inc %), not #((inc %))
-            (and (seq? body) (str/starts-with? b "(") (str/ends-with? b ")")) (str "#" b)
+            (and (seq? body)
+                 (let [v (comments/visible b)] (and (str/starts-with? v "(") (str/ends-with? v ")"))))
+            (str "#" b)
             ;; any other body (%, [% 1], 'x, @a) is a value: #(%) would call it
             :else (str "#(do " b ")")))
 
@@ -1246,7 +1328,7 @@
         (let [[_ target & idx] form
               t (print-form target)]
           (str (if (or (depth0-space? t)
-                       (and (seq? target) (not (str/ends-with? t ")"))))
+                       (and (seq? target) (not (str/ends-with? (comments/visible t) ")"))))
                  (str "(" t ")")
                  t)
                "[" (print-args idx) "]"))
@@ -1268,6 +1350,7 @@
         (let [method-name (subs (str head) 1)
               [obj & method-args] (rest form)
               obj-str (print-form obj)
+              obj-vis (comments/visible obj-str)
               ;; Safe to use obj.method() notation only when obj-str is a simple expression:
               ;; - not ending with a number literal (would look like "1.method")
               ;; - not namespace-qualified (contains '/')
@@ -1275,14 +1358,14 @@
               ;; - no spaces (complex expressions like "or(a, b)" are ambiguous in arg position:
               ;;   "f(or(a, b).method())" would be parsed as "f(or(a, (.method b)))")
               ;; - not a boolean/nil literal: "true.setDaemon()" reads "true" as Symbol, not Boolean
-              last-word (last (str/split (str/trim obj-str) #"\s+"))
+              last-word (last (str/split (str/trim obj-vis) #"\s+"))
               safe? (and (not *dotted-calls*) ; obj.m(x) would read as the call (obj.m x)
                          (not (re-matches #"-?[0-9].*" last-word))
-                         (not (str/includes? obj-str "/"))
-                         (not (re-matches #"[~@'].*" obj-str))
-                         (not (str/includes? obj-str " "))
-                         (not (str/includes? obj-str ".-"))
-                         (not (#{"true" "false" "nil"} obj-str)))]
+                         (not (str/includes? obj-vis "/"))
+                         (not (re-matches #"[~@'].*" obj-vis))
+                         (not (str/includes? obj-vis " "))
+                         (not (str/includes? obj-vis ".-"))
+                         (not (#{"true" "false" "nil"} obj-vis)))]
           (if safe?
             (str obj-str "." method-name "(" (print-args method-args) ")")
             (str "." method-name "(" obj-str (when (seq method-args) (str ", " (print-args method-args))) ")")))
@@ -1294,12 +1377,13 @@
         (let [field-sym-str (str head)          ;; e.g. ".-uuid"
               field-name    (subs field-sym-str 1) ;; e.g. "-uuid" (dot removed for safe concat)
               obj-str (print-form (second form))
-              last-word (last (str/split (str/trim obj-str) #"\s+"))
+              obj-vis (comments/visible obj-str)
+              last-word (last (str/split (str/trim obj-vis) #"\s+"))
               safe? (and (not (re-matches #"-?[0-9].*" last-word))
-                         (not (str/includes? obj-str "/"))
-                         (not (re-matches #"[~@'].*" obj-str))
-                         (not (str/includes? obj-str " "))
-                         (not (str/includes? obj-str ".-")))]
+                         (not (str/includes? obj-vis "/"))
+                         (not (re-matches #"[~@'].*" obj-vis))
+                         (not (str/includes? obj-vis " "))
+                         (not (str/includes? obj-vis ".-")))]
           (if safe?
             (str obj-str "." field-name)
             ;; Unsafe: use function-call notation .-field(obj) which round-trips cleanly
@@ -1349,7 +1433,7 @@
           :else
           ;; Arguments are comma-separated; an operator preceded by a comma is
           ;; never infix, so f(a, +, b) keeps + as the symbol it is.
-          (str (print-form head) "(" (print-args (rest form)) ")"))))
+          (str (print-form head) "(" (print-args (rest form)) ")")))))
 
     ;; syntax-quote / unquote / unquote-splicing AST nodes
     ;; Must be before map? because these are defrecords (satisfy map?)
@@ -1386,7 +1470,8 @@
     (let [prefix (if (forms/rc-splicing? form) "#?@(" "#?(")
           pairs (partition 2 (forms/rc-form form))
           body (str/join " " (mapcat (fn [[k v]] [(print-form k) (print-form v)]) pairs))]
-      (str prefix body ")"))
+      ;; the form list inside holds the comments (a JVM reader conditional cannot)
+      (comments/wrap (forms/rc-form form) (str prefix body ")")))
 
     ;; vector
     (vector? form)
@@ -1482,13 +1567,29 @@
               r))
           forms)))
 
+(defn- join-top-level
+  "Top-level texts separated by blank lines, the comments after the last form
+   at the end (on the next line when they followed it there in the source)."
+  [forms texts]
+  (let [body (str/join "\n\n" texts)
+        trailing (comments/end-lines forms)
+        last-end (comments/end-line (last forms))
+        t-line (:line (first (:end (comments/comments-of forms))))]
+    (cond
+      (not trailing) body
+      (str/blank? body) (str/join "\n" trailing)
+      :else (str body
+                 (if (and last-end t-line (<= t-line (inc last-end))) "\n" "\n\n")
+                 (str/join "\n" trailing)))))
+
 (defn print-sup-string
-  "Print Clojure forms as sup text."
+  "Print Clojure forms as sup text, with their comments."
   [forms]
-  (str/join "\n\n" (map-in-ns-context print-form forms)))
+  (join-top-level forms (map-in-ns-context #(comments/with-comments % print-form) forms)))
 
 (defn print-clj-string
-  "Print Clojure forms as Clojure text with reader sugar ('quote, @deref, #'var)."
+  "Print Clojure forms as Clojure text with reader sugar ('quote, @deref, #'var),
+   with their comments."
   [forms]
   (binding [*mode* :clj]
-    (str/join "\n\n" (map print-form forms))))
+    (join-top-level forms (map #(comments/with-comments % print-form) forms))))

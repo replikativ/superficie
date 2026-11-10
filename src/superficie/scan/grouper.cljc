@@ -110,9 +110,10 @@
        items loc exp-close nil open-type)
 
       ;; Correct matching close
+      ;; (the closer's position, for the reader's end positions)
       (= (:type stop-tok) exp-close)
       (do (gadvance! g)   ; consume the matching close
-          (ctor items loc))
+          (ctor items (assoc loc :close (select-keys stop-tok [:line :col :offset]))))
 
       ;; Wrong close delimiter — do NOT consume it; let the parent handle it
       :else
